@@ -1,0 +1,10 @@
+.vcopilot
+.venv
+**/*.pyc
+**.Trash*
+**ipynb_checkpoints
+*.csv
+reports/*
+__pycache__/
+*.py[cod]
+*$py.class
