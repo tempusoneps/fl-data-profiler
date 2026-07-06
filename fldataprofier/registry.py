@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 from fldataprofier.modules.base import ProfilingModule
+from fldataprofier.modules.boruta import BorutaRelationshipsModule
 from fldataprofier.modules.scipy import ScipyRelationshipsModule
+from fldataprofier.modules.shap import ShapRelationshipsModule
 from fldataprofier.modules.sklearn import SklearnRelationshipsModule
 from fldataprofier.modules.statsmodels import StatsmodelsRelationshipsModule
 from fldataprofier.modules.statistics import StatisticsModule
+from fldataprofier.modules.xgboost import XGBoostRelationshipsModule
 
 
 _MODULES: dict[str, ProfilingModule] = {
+    "boruta": BorutaRelationshipsModule(),
     "scipy": ScipyRelationshipsModule(),
+    "shap": ShapRelationshipsModule(),
     "sklearn": SklearnRelationshipsModule(),
     "statistics": StatisticsModule(),
     "statsmodels": StatsmodelsRelationshipsModule(),
+    "xgboost": XGBoostRelationshipsModule(),
 }
 
 

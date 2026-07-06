@@ -32,6 +32,24 @@ Statsmodels module dùng để xem OLS coefficient, p-value và confidence inter
 fldataprofier fit feature.csv label.csv --module statsmodels
 ```
 
+XGBoost module dùng gradient boosting để đánh giá sức dự đoán phi tuyến và feature importance:
+
+```bash
+fldataprofier fit feature.csv label.csv --module xgboost
+```
+
+SHAP module fit XGBoost và giải thích feature impact bằng mean absolute SHAP value:
+
+```bash
+fldataprofier fit feature.csv label.csv --module shap
+```
+
+Boruta module dùng RandomForest với shadow features để chọn feature quan trọng:
+
+```bash
+fldataprofier fit feature.csv label.csv --module boruta
+```
+
 Mặc định output được ghi vào `reports/<module>/`, ví dụ `reports/statistics/` hoặc `reports/scipy/`. Có thể đổi thư mục output hoặc khóa join:
 
 ```bash
@@ -80,6 +98,30 @@ Module `statsmodels` fit OLS cho numeric labels, chọn tối đa 25 numeric fea
 - `scores.csv`
 - `coefficients.csv`
 
+Module `xgboost` dùng numeric features trước, fit `XGBRegressor` cho label numeric và `XGBClassifier` cho label categorical/binary:
+
+- `report.md`
+- `report.html`
+- `summary.json`
+- `scores.csv`
+- `importance.csv`
+
+Module `shap` fit XGBoost rồi tính mean absolute SHAP value cho từng feature/label:
+
+- `report.md`
+- `report.html`
+- `summary.json`
+- `scores.csv`
+- `shap_importance.csv`
+
+Module `boruta` fit RandomForest nhiều vòng với shadow features, phân loại feature thành `confirmed`, `tentative` hoặc `rejected`:
+
+- `report.md`
+- `report.html`
+- `summary.json`
+- `scores.csv`
+- `boruta_features.csv`
+
 ## Thiết kế module
 
 Package được tách theo registry để mở rộng:
@@ -87,9 +129,12 @@ Package được tách theo registry để mở rộng:
 - `fldataprofier/cli.py`: parse command `fit` và gọi module được chọn.
 - `fldataprofier/registry.py`: đăng ký module theo tên.
 - `fldataprofier/modules/base.py`: protocol chung cho module profiling.
+- `fldataprofier/modules/boruta.py`: module Boruta-style feature selection.
 - `fldataprofier/modules/statistics.py`: module thống kê đầu tiên.
 - `fldataprofier/modules/scipy.py`: module SciPy cho kiểm định feature/label.
+- `fldataprofier/modules/shap.py`: module SHAP cho giải thích model XGBoost.
 - `fldataprofier/modules/sklearn.py`: module sklearn cho model score và feature importance.
 - `fldataprofier/modules/statsmodels.py`: module statsmodels cho OLS inference.
+- `fldataprofier/modules/xgboost.py`: module XGBoost cho gradient boosting score và feature importance.
 
 Để thêm module mới, tạo class có method `run(...)` trả về `ModuleResult`, rồi đăng ký instance trong `fldataprofier/registry.py`.
