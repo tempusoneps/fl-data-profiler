@@ -14,6 +14,12 @@ uv sync
 fldataprofier fit feature.csv label.csv --module statistics
 ```
 
+EDA module dùng để phân tích tổng quan riêng cả `feature.csv` và `label.csv`:
+
+```bash
+fldataprofier fit feature.csv label.csv --module eda
+```
+
 SciPy module dùng để kiểm định mối quan hệ feature/label:
 
 ```bash
@@ -63,6 +69,19 @@ fldataprofiler fit feature.csv label.csv --module statistics
 ```
 
 ## Artifacts
+
+Module `eda` tạo các file:
+
+- `report.md`
+- `report.html`
+- `summary.json`
+- `dataset_overview.csv`
+- `columns_profile.csv`
+- `missingness.csv`
+- `numeric_summary.csv`
+- `categorical_summary.csv`
+- `feature_correlation_heatmap.png`
+- `label_correlation_heatmap.png`
 
 Module `statistics` tạo các file:
 
@@ -130,6 +149,7 @@ Package được tách theo registry để mở rộng:
 - `fldataprofier/registry.py`: đăng ký module theo tên.
 - `fldataprofier/modules/base.py`: protocol chung cho module profiling.
 - `fldataprofier/modules/boruta.py`: module Boruta-style feature selection.
+- `fldataprofier/modules/eda.py`: module EDA tổng quan cho feature và label.
 - `fldataprofier/modules/statistics.py`: module thống kê đầu tiên.
 - `fldataprofier/modules/scipy.py`: module SciPy cho kiểm định feature/label.
 - `fldataprofier/modules/shap.py`: module SHAP cho giải thích model XGBoost.
