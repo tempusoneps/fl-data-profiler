@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,11 +13,13 @@ import numpy as np
 import pandas as pd
 
 from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.statistics import (
-    DatasetShape,
+from fldataprofier.modules.statistics import DatasetShape
+from fldataprofier.utils import (
     _markdown_table,
-    _numeric_series as _statistics_numeric_series,
+    _numeric_series,
     _round,
+    _write_csv,
+    _write_json,
 )
 
 
@@ -119,10 +120,6 @@ def _read_csv(path: Path) -> pd.DataFrame:
     if "Date" in frame.columns:
         frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
     return frame
-
-
-def _numeric_series(series: pd.Series) -> pd.Series:
-    return _statistics_numeric_series(series).astype("float64")
 
 
 def _select_label_columns(labels: pd.DataFrame, targets: list[str] | None) -> pd.DataFrame:
@@ -294,16 +291,6 @@ def _write_correlation_heatmap(path: Path, frame: pd.DataFrame, title: str) -> N
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
-
-
-def _write_json(path: Path, payload: dict[str, object]) -> Path:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    return path
-
-
-def _write_csv(path: Path, frame: pd.DataFrame) -> Path:
-    frame.to_csv(path, index=False)
-    return path
 
 
 def _run_notes(join_key: str | None, targets: list[str] | None) -> list[str]:

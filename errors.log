@@ -1,0 +1,58 @@
+fldataprofier fit VN30F1M_5m_feature.csv VN30F1M_5m_label.csv --mod eda
+Traceback (most recent call last):
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/bin/fldataprofier", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/fldataprofier/cli.py", line 49, in main
+    result = module.run(
+             ^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/fldataprofier/modules/eda.py", line 74, in run
+    numeric_summary = _numeric_summary(
+                      ^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/fldataprofier/modules/eda.py", line 206, in _numeric_summary
+    "q25": _round(float(series.quantile(0.25))),
+                        ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/pandas/core/series.py", line 2677, in quantile
+    result = df.quantile(q=q, interpolation=interpolation, numeric_only=False)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/pandas/core/frame.py", line 16132, in quantile
+    res_df = self.quantile(
+             ^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/pandas/core/frame.py", line 16177, in quantile
+    res = data._mgr.quantile(qs=q, interpolation=interpolation)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/pandas/core/internals/managers.py", line 1728, in quantile
+    blk.quantile(qs=qs, interpolation=interpolation) for blk in self.blocks
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/pandas/core/internals/blocks.py", line 1495, in quantile
+    result = quantile_compat(self.values, np.asarray(qs._values), interpolation)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/pandas/core/array_algos/quantile.py", line 39, in quantile_compat
+    return quantile_with_mask(values, mask, fill_value, qs, interpolation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/pandas/core/array_algos/quantile.py", line 97, in quantile_with_mask
+    result = _nanquantile(
+             ^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/pandas/core/array_algos/quantile.py", line 218, in _nanquantile
+    return np.quantile(
+           ^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py", line 4537, in quantile
+    return _quantile_unchecked(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py", line 4550, in _quantile_unchecked
+    return _ureduce(a,
+           ^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py", line 3894, in _ureduce
+    r = func(a, **kwargs)
+        ^^^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py", line 4727, in _quantile_ureduce_func
+    result = _quantile(arr,
+             ^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py", line 4859, in _quantile
+    result = _lerp(previous,
+             ^^^^^^^^^^^^^^^
+  File "/home/v002353/Desktop/SN/fl-data-profiler/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py", line 4653, in _lerp
+    diff_b_a = subtract(b, a)
+               ^^^^^^^^^^^^^^
+TypeError: numpy boolean subtract, the `-` operator, is not supported, use the bitwise_xor, the `^` operator, or the logical_xor function instead.
+

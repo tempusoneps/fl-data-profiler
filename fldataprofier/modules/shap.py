@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,14 +19,19 @@ from sklearn.preprocessing import LabelEncoder
 from xgboost import XGBClassifier, XGBRegressor
 
 from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.sklearn import _date_columns
-from fldataprofier.modules.statistics import (
-    DatasetShape,
+from fldataprofier.modules.statistics import DatasetShape
+from fldataprofier.utils import (
+    _date_columns,
     _markdown_table,
     _merge_inputs,
+    _model_results_frame,
+    _numeric_feature_columns,
     _numeric_series,
     _round,
+    _sample_rows,
     _select_targets,
+    _write_csv,
+    _write_json,
 )
 
 
@@ -77,7 +81,7 @@ class ShapRelationshipsModule:
         selected_targets = _select_targets(label_columns, targets)
         numeric_features = _numeric_feature_columns(merged, feature_columns)
 
-        model_frame = _sample_rows(merged[[*numeric_features, *selected_targets]], MAX_ROWS)
+        model_frame = _sample_rows(merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE)
         model_results, shap_importance = _fit_target_models(
             model_frame,
             numeric_features,
@@ -130,21 +134,6 @@ class ShapRelationshipsModule:
         artifacts.append(html_path)
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
-
-
-def _numeric_feature_columns(merged: pd.DataFrame, feature_columns: list[str]) -> list[str]:
-    columns: list[str] = []
-    for column in feature_columns:
-        values = _numeric_series(merged[column])
-        if values.notna().sum() >= 10 and values.nunique(dropna=True) >= 2:
-            columns.append(column)
-    return columns
-
-
-def _sample_rows(frame: pd.DataFrame, max_rows: int) -> pd.DataFrame:
-    if len(frame) <= max_rows:
-        return frame
-    return frame.sample(n=max_rows, random_state=RANDOM_STATE).sort_index()
 
 
 def _fit_target_models(
@@ -203,7 +192,7 @@ def _fit_regression(
     )
     model.fit(x_train, y_train)
     predictions = model.predict(x_test)
-    explain_x = _sample_rows(frame[features.columns], MAX_EXPLAIN_ROWS)
+    explain_x = _sample_rows(frame[features.columns], MAX_EXPLAIN_ROWS, RANDOM_STATE)
     importance = _shap_importance(label, "regression", model, explain_x)
     rmse = float(np.sqrt(mean_squared_error(y_test, predictions)))
     return (
@@ -261,7 +250,7 @@ def _fit_classification(
     )
     model.fit(x_train, y_train)
     predictions = model.predict(x_test)
-    explain_x = _sample_rows(frame[features.columns], MAX_EXPLAIN_ROWS)
+    explain_x = _sample_rows(frame[features.columns], MAX_EXPLAIN_ROWS, RANDOM_STATE)
     importance = _shap_importance(label, "classification", model, explain_x)
     return (
         {
@@ -311,32 +300,6 @@ def _shap_importance(
     return sorted(rows, key=lambda row: row["mean_abs_shap"] or 0, reverse=True)
 
 
-def _model_results_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
-    columns = [
-        "label",
-        "task",
-        "model",
-        "samples",
-        "features",
-        "score_primary",
-        "score_primary_name",
-        "mae",
-        "rmse",
-        "accuracy",
-        "balanced_accuracy",
-        "f1_weighted",
-        "note",
-    ]
-    frame = pd.DataFrame(rows, columns=columns)
-    if frame.empty:
-        return frame
-    return frame.sort_values(
-        ["score_primary", "samples"],
-        ascending=[False, False],
-        na_position="last",
-    ).reset_index(drop=True)
-
-
 def _importance_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     columns = ["label", "task", "feature", "mean_abs_shap", "explain_rows"]
     frame = pd.DataFrame(rows, columns=columns)
@@ -347,16 +310,6 @@ def _importance_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
         ascending=[True, False],
         na_position="last",
     ).reset_index(drop=True)
-
-
-def _write_json(path: Path, payload: dict[str, object]) -> Path:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    return path
-
-
-def _write_csv(path: Path, frame: pd.DataFrame) -> Path:
-    frame.to_csv(path, index=False)
-    return path
 
 
 def _render_markdown(

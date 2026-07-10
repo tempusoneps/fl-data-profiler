@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from itertools import combinations
@@ -11,13 +10,16 @@ import pandas as pd
 from scipy import linalg, stats
 
 from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.statistics import (
-    DatasetShape,
+from fldataprofier.modules.statistics import DatasetShape
+from fldataprofier.utils import (
+    _date_columns,
     _markdown_table,
     _merge_inputs,
     _numeric_series,
     _round,
     _select_targets,
+    _write_csv,
+    _write_json,
 )
 
 
@@ -101,10 +103,6 @@ class ScipyRelationshipsModule:
         artifacts.append(html_path)
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
-
-
-def _date_columns(columns: list[str]) -> list[str]:
-    return [column for column in columns if column.lower() == "date"]
 
 
 def _pairwise_tests(
@@ -340,16 +338,6 @@ def _cramers_v(chi2_statistic: float, sample_count: int, shape: tuple[int, int])
     if denominator <= 0:
         return 0.0
     return float(np.sqrt(chi2_statistic / denominator))
-
-
-def _write_json(path: Path, payload: dict[str, object]) -> Path:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    return path
-
-
-def _write_csv(path: Path, frame: pd.DataFrame) -> Path:
-    frame.to_csv(path, index=False)
-    return path
 
 
 def _render_markdown(

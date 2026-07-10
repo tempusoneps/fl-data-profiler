@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,13 +9,17 @@ import pandas as pd
 import statsmodels.api as sm
 
 from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.statistics import (
-    DatasetShape,
+from fldataprofier.modules.statistics import DatasetShape
+from fldataprofier.utils import (
+    _date_columns,
     _markdown_table,
     _merge_inputs,
     _numeric_series,
     _round,
+    _sample_rows,
     _select_targets,
+    _write_csv,
+    _write_json,
 )
 
 
@@ -63,7 +66,7 @@ class StatsmodelsRelationshipsModule:
         label_columns = [column for column in label_columns if column not in ignored_columns]
         selected_targets = _select_targets(label_columns, targets)
 
-        model_frame = _sample_rows(merged[[*feature_columns, *selected_targets]])
+        model_frame = _sample_rows(merged[[*feature_columns, *selected_targets]], MAX_ROWS, RANDOM_STATE)
         model_results, coefficients = _fit_ols_models(model_frame, feature_columns, selected_targets)
 
         run_dir = output_dir / self.name
@@ -107,16 +110,6 @@ class StatsmodelsRelationshipsModule:
         artifacts.append(html_path)
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
-
-
-def _date_columns(columns: list[str]) -> list[str]:
-    return [column for column in columns if str(column).lower() == "date"]
-
-
-def _sample_rows(frame: pd.DataFrame) -> pd.DataFrame:
-    if len(frame) <= MAX_ROWS:
-        return frame
-    return frame.sample(n=MAX_ROWS, random_state=RANDOM_STATE).sort_index()
 
 
 def _fit_ols_models(
@@ -253,16 +246,6 @@ def _coefficient_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     if frame.empty:
         return frame
     return frame.sort_values(["label", "p_value", "abs_coefficient"], ascending=[True, True, False], na_position="last").reset_index(drop=True)
-
-
-def _write_json(path: Path, payload: dict[str, object]) -> Path:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    return path
-
-
-def _write_csv(path: Path, frame: pd.DataFrame) -> Path:
-    frame.to_csv(path, index=False)
-    return path
 
 
 def _render_markdown(

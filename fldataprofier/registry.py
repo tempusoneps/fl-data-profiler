@@ -3,6 +3,7 @@ from __future__ import annotations
 from fldataprofier.modules.base import ProfilingModule
 from fldataprofier.modules.boruta import BorutaRelationshipsModule
 from fldataprofier.modules.eda import EdaModule
+from fldataprofier.modules.kmean import KMeanRelationshipsModule
 from fldataprofier.modules.scipy import ScipyRelationshipsModule
 from fldataprofier.modules.shap import ShapRelationshipsModule
 from fldataprofier.modules.sklearn import SklearnRelationshipsModule
@@ -14,6 +15,7 @@ from fldataprofier.modules.xgboost import XGBoostRelationshipsModule
 _MODULES: dict[str, ProfilingModule] = {
     "boruta": BorutaRelationshipsModule(),
     "eda": EdaModule(),
+    "kmean": KMeanRelationshipsModule(),
     "scipy": ScipyRelationshipsModule(),
     "shap": ShapRelationshipsModule(),
     "sklearn": SklearnRelationshipsModule(),
