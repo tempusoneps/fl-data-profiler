@@ -92,6 +92,7 @@ dependencies = [
     { name = "scipy" },
     { name = "shap" },
     { name = "statsmodels" },
+    { name = "tqdm" },
     { name = "xgboost" },
 ]
 
@@ -105,6 +106,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.16.0" },
     { name = "shap", specifier = ">=0.48.0" },
     { name = "statsmodels", specifier = ">=0.14.6" },
+    { name = "tqdm", specifier = ">=4.67.0" },
     { name = "xgboost", specifier = ">=3.0.0" },
 ]
 
