@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -86,6 +87,49 @@ class FeatureScoringModuleTests(unittest.TestCase):
 
         self.assertEqual("signal", scores.iloc[0]["feature"])
         self.assertTrue({"rank_ic", "permutation_importance"}.issubset(set(components["score_name"])))
+
+    def test_timeseries_importance_uses_tqdm_when_progress_enabled(self) -> None:
+        from fldataprofier.modules.timeseries_importance import TimeSeriesImportanceModule
+
+        class FakeProgress:
+            def __init__(self, *args, **kwargs) -> None:
+                self.args = args
+                self.kwargs = kwargs
+                self.updates: list[int] = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback) -> bool:
+                return False
+
+            def set_postfix_str(self, value: str) -> None:
+                self.postfix = value
+
+            def update(self, value: int) -> None:
+                self.updates.append(value)
+
+        progress_instances: list[FakeProgress] = []
+
+        def fake_tqdm(*args, **kwargs):
+            progress = FakeProgress(*args, **kwargs)
+            progress_instances.append(progress)
+            return progress
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            feature_csv, label_csv = make_signal_dataset(tmp_path)
+            with patch("fldataprofier.modules.timeseries_importance.tqdm", fake_tqdm):
+                TimeSeriesImportanceModule(
+                    n_estimators=5,
+                    random_state=11,
+                    progress=True,
+                ).run(feature_csv, label_csv, tmp_path / "out")
+
+        self.assertEqual(1, len(progress_instances))
+        self.assertEqual(5, progress_instances[0].kwargs["total"])
+        self.assertFalse(progress_instances[0].kwargs["disable"])
+        self.assertEqual([1, 1, 1, 1, 1], progress_instances[0].updates)
 
     def test_remaining_feature_selection_modules_write_scores(self) -> None:
         module_cases = [
