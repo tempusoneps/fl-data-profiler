@@ -62,6 +62,12 @@ KMean module ghép từng cặp numeric feature với từng label category/text
 fldataprofier fit feature.csv label.csv --module kmean
 ```
 
+KMeans GPU module dùng RAPIDS cuML KMeans cho cùng kiểu report, tối ưu precompute dữ liệu và giới hạn sample cho silhouette metric. Module này cần cài `cuml` phù hợp CUDA/driver của máy:
+
+```bash
+fldataprofier fit feature.parquet label.parquet --module kmeans_gpu
+```
+
 Mặc định output được ghi vào `reports/<module>/`, ví dụ `reports/statistics/` hoặc `reports/scipy/`. Có thể đổi thư mục output hoặc khóa join:
 
 ```bash
@@ -157,6 +163,16 @@ Module `kmean` tạo toàn bộ bộ `feature_1 + feature_2 + label`, split trai
 - `kmean_results.csv`
 - `cluster_label_distribution.csv`
 
+Module `kmeans_gpu` tạo cùng artifact với `kmean`, nhưng dùng RAPIDS cuML KMeans, precompute numeric/label arrays và chỉ tính silhouette trên sample giới hạn để giảm thời gian chạy:
+
+- `report.md`
+- `report.html`
+- `summary.json`
+- `numeric_features.csv`
+- `categorical_labels.csv`
+- `kmean_results.csv`
+- `cluster_label_distribution.csv`
+
 ## Thiết kế module
 
 Package được tách theo registry để mở rộng:
@@ -168,6 +184,7 @@ Package được tách theo registry để mở rộng:
 - `fldataprofier/modules/boruta.py`: module Boruta-style feature selection.
 - `fldataprofier/modules/eda.py`: module EDA tổng quan cho feature và label.
 - `fldataprofier/modules/kmean.py`: module KMeans clustering cho từng cặp numeric feature và categorical/text label.
+- `fldataprofier/modules/kmeans_gpu.py`: module KMeans GPU dùng RAPIDS cuML và tối ưu preprocessing/silhouette sampling.
 - `fldataprofier/modules/statistics.py`: module thống kê đầu tiên.
 - `fldataprofier/modules/scipy.py`: module SciPy cho kiểm định feature/label.
 - `fldataprofier/modules/shap.py`: module SHAP cho giải thích model XGBoost.

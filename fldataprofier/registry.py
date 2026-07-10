@@ -4,6 +4,7 @@ from fldataprofier.modules.base import ProfilingModule
 from fldataprofier.modules.boruta import BorutaRelationshipsModule
 from fldataprofier.modules.eda import EdaModule
 from fldataprofier.modules.kmean import KMeanRelationshipsModule
+from fldataprofier.modules.kmeans_gpu import KMeansGpuRelationshipsModule
 from fldataprofier.modules.scipy import ScipyRelationshipsModule
 from fldataprofier.modules.shap import ShapRelationshipsModule
 from fldataprofier.modules.sklearn import SklearnRelationshipsModule
@@ -16,6 +17,7 @@ _MODULES: dict[str, ProfilingModule] = {
     "boruta": BorutaRelationshipsModule(),
     "eda": EdaModule(),
     "kmean": KMeanRelationshipsModule(),
+    "kmeans_gpu": KMeansGpuRelationshipsModule(),
     "scipy": ScipyRelationshipsModule(),
     "shap": ShapRelationshipsModule(),
     "sklearn": SklearnRelationshipsModule(),
