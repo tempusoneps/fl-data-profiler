@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 
 
+SUPPORTED_INPUT_SUFFIXES = (".csv", ".parquet")
+
+
 MODEL_RESULT_COLUMNS = [
     "label",
     "task",
@@ -22,6 +25,35 @@ MODEL_RESULT_COLUMNS = [
     "f1_weighted",
     "note",
 ]
+
+
+def _is_supported_input_path(path: Path) -> bool:
+    return path.suffix.lower() in SUPPORTED_INPUT_SUFFIXES
+
+
+def _supported_input_formats_message() -> str:
+    return " or ".join(SUPPORTED_INPUT_SUFFIXES)
+
+
+def _read_table(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        frame = pd.read_csv(path, low_memory=False)
+    elif suffix == ".parquet":
+        frame = pd.read_parquet(path)
+    else:
+        raise ValueError(f"Unsupported input file type for {path}. Expected {_supported_input_formats_message()}.")
+
+    if "Date" in frame.columns:
+        frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+    return frame
+
+
+def _read_table_with_date_index(path: Path) -> pd.DataFrame:
+    frame = _read_table(path)
+    if "Date" in frame.columns:
+        return frame.set_index("Date")
+    return frame
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> Path:

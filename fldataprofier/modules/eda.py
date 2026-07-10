@@ -15,6 +15,7 @@ import pandas as pd
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
+    _read_table,
     _markdown_table,
     _numeric_series,
     _round,
@@ -47,8 +48,8 @@ class EdaModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        features = _read_csv(feature_csv)
-        labels = _read_csv(label_csv)
+        features = _read_table(feature_csv)
+        labels = _read_table(label_csv)
 
         selected_labels = _select_label_columns(labels, targets)
 
@@ -113,13 +114,6 @@ class EdaModule:
         artifacts.append(html_path)
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
-
-
-def _read_csv(path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(path, low_memory=False)
-    if "Date" in frame.columns:
-        frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
-    return frame
 
 
 def _select_label_columns(labels: pd.DataFrame, targets: list[str] | None) -> pd.DataFrame:

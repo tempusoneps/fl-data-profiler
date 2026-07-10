@@ -4,6 +4,10 @@ import argparse
 from pathlib import Path
 
 from fldataprofier.registry import get_module, list_modules
+from fldataprofier.utils import (
+    _is_supported_input_path,
+    _supported_input_formats_message,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,9 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     if args.command == "fit":
+        _validate_input_path(parser, "feature_csv", args.feature_csv)
+        _validate_input_path(parser, "label_csv", args.label_csv)
         module = get_module(args.module)
         result = module.run(
             feature_csv=args.feature_csv,
@@ -59,6 +66,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     raise ValueError(f"Unsupported command: {args.command}")
+
+
+def _validate_input_path(parser: argparse.ArgumentParser, name: str, path: Path) -> None:
+    if not _is_supported_input_path(path):
+        parser.error(
+            f"{name} must be a {_supported_input_formats_message()} file: {path}"
+        )
 
 
 if __name__ == "__main__":

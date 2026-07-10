@@ -22,6 +22,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
+    _read_table_with_date_index,
     _date_columns,
     _markdown_table,
     _merge_inputs,
@@ -71,8 +72,8 @@ class KMeanRelationshipsModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        features = _read_csv(feature_csv)
-        labels = _read_csv(label_csv)
+        features = _read_table_with_date_index(feature_csv)
+        labels = _read_table_with_date_index(label_csv)
         merged, feature_columns, label_columns, join_strategy = _merge_inputs(
             features, labels, join_key
         )
@@ -147,13 +148,6 @@ class KMeanRelationshipsModule:
         artifacts.append(html_path)
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
-
-
-def _read_csv(path: Path) -> pd.DataFrame:
-    header = pd.read_csv(path, nrows=0)
-    if "Date" in header.columns:
-        return pd.read_csv(path, parse_dates=["Date"], index_col="Date", low_memory=False)
-    return pd.read_csv(path, low_memory=False)
 
 
 def _categorical_label_columns(merged: pd.DataFrame, label_columns: list[str]) -> list[str]:

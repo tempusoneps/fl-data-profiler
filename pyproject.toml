@@ -8,6 +8,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.2.6",
     "pandas>=3.0.0",
+    "pyarrow>=18.0.0",
     "scikit-learn>=1.8.0",
     "scipy>=1.16.0",
     "shap>=0.48.0",
@@ -16,7 +17,6 @@ dependencies = [
 ]
 
 [project.scripts]
-fldataprofier = "fldataprofier.cli:main"
 fldataprofiler = "fldataprofier.cli:main"
 
 [build-system]

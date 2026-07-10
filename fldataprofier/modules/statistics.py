@@ -14,6 +14,7 @@ import pandas as pd
 
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.utils import (
+    _read_table_with_date_index,
     _markdown_table,
     _merge_inputs,
     _numeric_series,
@@ -54,8 +55,8 @@ class StatisticsModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        features = pd.read_csv(feature_csv, parse_dates=['Date'], index_col='Date')
-        labels = pd.read_csv(label_csv, parse_dates=['Date'], index_col='Date')
+        features = _read_table_with_date_index(feature_csv)
+        labels = _read_table_with_date_index(label_csv)
         merged, feature_columns, label_columns, join_strategy = _merge_inputs(
             features, labels, join_key
         )
