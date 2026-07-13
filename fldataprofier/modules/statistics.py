@@ -14,6 +14,7 @@ import pandas as pd
 
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.utils import (
+    _html_markdown_details,
     _read_table_with_date_index,
     _markdown_table,
     _merge_inputs,
@@ -290,11 +291,6 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, correlations: pd.DataFrame) -> str:
-    escaped_markdown = (
-        markdown.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
     table = correlations.head(25).to_html(index=False, classes="data-table") if not correlations.empty else ""
     return f"""<!doctype html>
 <html lang="en">
@@ -311,7 +307,7 @@ def _render_html(markdown: str, correlations: pd.DataFrame) -> str:
   </style>
 </head>
 <body>
-  <pre>{escaped_markdown}</pre>
+  {_html_markdown_details(markdown)}
   <h2>Top Correlations</h2>
   {table}
   <img src="feature_label_correlation_heatmap.png" alt="Feature label correlation heatmap">

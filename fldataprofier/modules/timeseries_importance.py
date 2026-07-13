@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 
 import pandas as pd
-from tqdm.auto import tqdm
-
 from fldataprofier.modules.base import ModuleResult
+from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.time_series_scoring import (
     build_result,
     information_coefficient_rows,
@@ -37,20 +35,12 @@ class TimeSeriesImportanceModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        progress_enabled = sys.stderr.isatty() if self.progress is None else self.progress
-        with tqdm(
-            total=5,
-            desc=self.name,
-            unit="step",
-            disable=not progress_enabled,
-        ) as progress_bar:
-            progress_bar.set_postfix_str("load")
+        with ModuleProgress(self.name, total=5, enabled=self.progress) as progress_bar:
             prepared = load_prepared_data(feature_csv, label_csv, join_key, targets)
             report_dir = output_dir / self.name
             report_dir.mkdir(parents=True, exist_ok=True)
-            progress_bar.update(1)
+            progress_bar.step("load")
 
-            progress_bar.set_postfix_str("rank_ic")
             rank_ic_rows = [
                 row
                 for row in information_coefficient_rows(
@@ -60,9 +50,7 @@ class TimeSeriesImportanceModule:
                 )
                 if row.get("score_name") == "rank_ic"
             ]
-            progress_bar.update(1)
-
-            progress_bar.set_postfix_str("permutation")
+            progress_bar.step("rank_ic")
             permutation_rows = permutation_importance_rows(
                 prepared.merged,
                 prepared.feature_columns,
@@ -70,14 +58,10 @@ class TimeSeriesImportanceModule:
                 n_estimators=self.n_estimators,
                 random_state=self.random_state,
             )
-            progress_bar.update(1)
-
-            progress_bar.set_postfix_str("combine")
+            progress_bar.step("permutation")
             component_scores = pd.DataFrame([*rank_ic_rows, *permutation_rows])
             feature_scores = _combined_scores(component_scores)
-            progress_bar.update(1)
-
-            progress_bar.set_postfix_str("write")
+            progress_bar.step("combine")
             artifacts = [
                 _write_csv(report_dir / "component_scores.csv", component_scores),
                 _write_csv(report_dir / "feature_scores.csv", feature_scores),
@@ -94,10 +78,10 @@ class TimeSeriesImportanceModule:
                 {
                     "n_estimators": self.n_estimators,
                     "random_state": self.random_state,
-                    "progress_enabled": progress_enabled,
+                    "progress_enabled": progress_bar.enabled,
                 },
             )
-            progress_bar.update(1)
+            progress_bar.step("write")
             return result
 
 

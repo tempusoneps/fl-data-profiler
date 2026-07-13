@@ -4,7 +4,11 @@
 **.Trash*
 **ipynb_checkpoints
 *.csv
+*.parquet
 reports/*
 __pycache__/
 *.py[cod]
 *$py.class
+*.parquet
+.superpowers
+docs/superpowers

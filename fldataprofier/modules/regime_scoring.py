@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from fldataprofier.modules.base import ModuleResult
+from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.time_series_scoring import aggregate_scores, build_result, load_prepared_data
 from fldataprofier.modules.time_series_scoring import information_coefficient_rows
 from fldataprofier.utils import _numeric_series, _write_csv
@@ -13,8 +14,9 @@ from fldataprofier.utils import _numeric_series, _write_csv
 class RegimeScoringModule:
     name = "regime_scoring"
 
-    def __init__(self, n_regimes: int = 3) -> None:
+    def __init__(self, n_regimes: int = 3, progress: bool | None = None) -> None:
         self.n_regimes = n_regimes
+        self.progress = progress
 
     def run(
         self,
@@ -24,50 +26,61 @@ class RegimeScoringModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        prepared = load_prepared_data(feature_csv, label_csv, join_key, targets)
-        report_dir = output_dir / self.name
-        report_dir.mkdir(parents=True, exist_ok=True)
-        regimes = _assign_regimes(prepared.merged, prepared.feature_columns, prepared.target_columns, self.n_regimes)
-        rows: list[dict[str, object]] = []
-        for regime, index in regimes.groupby(regimes).groups.items():
-            regime_frame = prepared.merged.loc[index]
-            regime_rows = information_coefficient_rows(
-                regime_frame,
-                prepared.feature_columns,
-                prepared.target_columns,
-                min_train_size=50,
-                test_size=25,
-                step_size=25,
-                min_samples=10,
+        with ModuleProgress(self.name, total=5, enabled=self.progress) as progress_bar:
+            prepared = load_prepared_data(feature_csv, label_csv, join_key, targets)
+            report_dir = output_dir / self.name
+            report_dir.mkdir(parents=True, exist_ok=True)
+            progress_bar.step("load")
+            regimes = _assign_regimes(prepared.merged, prepared.feature_columns, prepared.target_columns, self.n_regimes)
+            progress_bar.step("regimes")
+            rows: list[dict[str, object]] = []
+            for regime, index in regimes.groupby(regimes).groups.items():
+                regime_frame = prepared.merged.loc[index]
+                regime_rows = information_coefficient_rows(
+                    regime_frame,
+                    prepared.feature_columns,
+                    prepared.target_columns,
+                    min_train_size=50,
+                    test_size=25,
+                    step_size=25,
+                    min_samples=10,
+                )
+                for row in regime_rows:
+                    row["regime"] = regime
+                rows.extend(regime_rows)
+            raw = pd.DataFrame(rows)
+            summary = aggregate_scores(raw.to_dict(orient="records"))
+            if not raw.empty:
+                regimes_by_feature = raw.groupby(["feature", "label", "score_name"])["regime"].nunique().reset_index()
+                regimes_by_feature = regimes_by_feature.rename(columns={"regime": "regime_count"})
+                summary = summary.merge(regimes_by_feature, on=["feature", "label", "score_name"], how="left")
+                summary["regime"] = "all"
+            else:
+                summary["regime"] = []
+                summary["regime_count"] = []
+            progress_bar.step("score")
+            artifacts = [
+                _write_csv(report_dir / "fold_scores.csv", raw),
+                _write_csv(report_dir / "feature_scores.csv", summary),
+                _write_csv(report_dir / "top_features.csv", summary.head(50)),
+            ]
+            progress_bar.step("artifacts")
+            result = build_result(
+                report_dir,
+                self.name,
+                feature_csv,
+                label_csv,
+                prepared,
+                summary,
+                artifacts,
+                {
+                    "n_regimes": self.n_regimes,
+                    "regime_count": int(regimes.nunique(dropna=True)),
+                    "progress_enabled": progress_bar.enabled,
+                },
             )
-            for row in regime_rows:
-                row["regime"] = regime
-            rows.extend(regime_rows)
-        raw = pd.DataFrame(rows)
-        summary = aggregate_scores(raw.to_dict(orient="records"))
-        if not raw.empty:
-            regimes_by_feature = raw.groupby(["feature", "label", "score_name"])["regime"].nunique().reset_index()
-            regimes_by_feature = regimes_by_feature.rename(columns={"regime": "regime_count"})
-            summary = summary.merge(regimes_by_feature, on=["feature", "label", "score_name"], how="left")
-            summary["regime"] = "all"
-        else:
-            summary["regime"] = []
-            summary["regime_count"] = []
-        artifacts = [
-            _write_csv(report_dir / "fold_scores.csv", raw),
-            _write_csv(report_dir / "feature_scores.csv", summary),
-            _write_csv(report_dir / "top_features.csv", summary.head(50)),
-        ]
-        return build_result(
-            report_dir,
-            self.name,
-            feature_csv,
-            label_csv,
-            prepared,
-            summary,
-            artifacts,
-            {"n_regimes": self.n_regimes, "regime_count": int(regimes.nunique(dropna=True))},
-        )
+            progress_bar.step("write")
+            return result
 
 
 def _assign_regimes(

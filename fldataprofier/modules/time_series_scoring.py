@@ -14,6 +14,7 @@ from sklearn.preprocessing import LabelEncoder
 
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.utils import (
+    _html_markdown_details,
     _markdown_table,
     _merge_inputs,
     _numeric_series,
@@ -301,7 +302,7 @@ def permutation_importance_rows(
                 model = RandomForestClassifier(
                     n_estimators=n_estimators,
                     max_features="sqrt",
-                    n_jobs=-1,
+                    n_jobs=1,
                     random_state=random_state + fold,
                 )
                 model.fit(x_fit, y_train)
@@ -321,7 +322,7 @@ def permutation_importance_rows(
                 model = RandomForestRegressor(
                     n_estimators=n_estimators,
                     max_features="sqrt",
-                    n_jobs=-1,
+                    n_jobs=1,
                     random_state=random_state + fold,
                 )
                 model.fit(x_fit, y_train)
@@ -446,7 +447,7 @@ def _render_report_html(markdown: str, top_scores: pd.DataFrame) -> str:
 <html lang="en">
 <head><meta charset="utf-8"><title>Feature scoring report</title></head>
 <body>
-<pre>{markdown}</pre>
+{_html_markdown_details(markdown)}
 {table}
 </body>
 </html>

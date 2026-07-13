@@ -20,8 +20,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from fldataprofier.modules.base import ModuleResult
+from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
+    _html_markdown_details,
     _read_table_with_date_index,
     _date_columns,
     _markdown_table,
@@ -64,6 +66,9 @@ class KMeanRunMetadata:
 class KMeanRelationshipsModule:
     name = "kmean"
 
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
+
     def run(
         self,
         feature_csv: Path,
@@ -92,11 +97,14 @@ class KMeanRelationshipsModule:
         )
 
         feature_pairs = list(combinations(numeric_features, 2))
-        results, cluster_distribution = _fit_kmeans_reports(
-            model_frame,
-            feature_pairs,
-            categorical_labels,
-        )
+        combinations_count = len(feature_pairs) * len(categorical_labels)
+        with ModuleProgress(self.name, total=combinations_count, enabled=self.progress) as progress_bar:
+            results, cluster_distribution = _fit_kmeans_reports(
+                model_frame,
+                feature_pairs,
+                categorical_labels,
+                progress_bar,
+            )
 
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -115,7 +123,7 @@ class KMeanRelationshipsModule:
             categorical_labels=categorical_labels,
             ignored_columns=ignored_columns,
             feature_pairs=len(feature_pairs),
-            combinations=len(feature_pairs) * len(categorical_labels),
+            combinations=combinations_count,
         )
 
         numeric_features_frame = pd.DataFrame({"feature": numeric_features})
@@ -182,6 +190,7 @@ def _fit_kmeans_reports(
     merged: pd.DataFrame,
     feature_pairs: list[tuple[str, str]],
     label_columns: list[str],
+    progress_bar: ModuleProgress | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     result_rows: list[dict[str, object]] = []
     distribution_rows: list[dict[str, object]] = []
@@ -192,6 +201,8 @@ def _fit_kmeans_reports(
             result, distribution = _fit_single_kmeans(feature_1, feature_2, label, x, merged[label])
             result_rows.append(result)
             distribution_rows.extend(distribution)
+            if progress_bar is not None:
+                progress_bar.step(f"{feature_1}+{feature_2}->{label}")
 
     return _results_frame(result_rows), _cluster_distribution_frame(distribution_rows)
 
@@ -236,6 +247,14 @@ def _fit_single_kmeans(
     scaler = StandardScaler()
     train_x = scaler.fit_transform(train_frame[[feature_1, feature_2]])
     test_x = scaler.transform(test_frame[[feature_1, feature_2]])
+    if _distinct_row_count(train_x) < class_count:
+        return _skipped_result(
+            feature_1,
+            feature_2,
+            label,
+            len(frame),
+            "not_enough_distinct_points_for_clusters",
+        ), []
 
     model = KMeans(n_clusters=class_count, n_init=10, random_state=RANDOM_STATE)
     model.fit(train_x)
@@ -313,6 +332,10 @@ def _safe_silhouette(features: np.ndarray, clusters: np.ndarray) -> float | None
     if len(unique_clusters) < 2 or len(unique_clusters) >= len(features):
         return None
     return _round(float(silhouette_score(features, clusters)))
+
+
+def _distinct_row_count(values: np.ndarray) -> int:
+    return int(np.unique(values, axis=0).shape[0])
 
 
 def _cluster_distribution(
@@ -460,7 +483,6 @@ Every numeric feature pair is combined with every categorical/text label. Each r
 
 
 def _render_html(markdown: str, results: pd.DataFrame) -> str:
-    escaped_markdown = markdown.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     ranked = _ranked_successful(results)
     table = ranked.head(50).to_html(index=False, classes="data-table") if not ranked.empty else ""
     return f"""<!doctype html>
@@ -477,7 +499,7 @@ def _render_html(markdown: str, results: pd.DataFrame) -> str:
   </style>
 </head>
 <body>
-  <pre>{escaped_markdown}</pre>
+  {_html_markdown_details(markdown)}
   <h2>Top KMeans Results</h2>
   {table}
 </body>

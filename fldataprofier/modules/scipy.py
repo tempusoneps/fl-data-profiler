@@ -12,6 +12,7 @@ from scipy import linalg, stats
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
+    _html_markdown_details,
     _read_table_with_date_index,
     _date_columns,
     _markdown_table,
@@ -388,11 +389,6 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, pairwise: pd.DataFrame, combined: pd.DataFrame) -> str:
-    escaped_markdown = (
-        markdown.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
     combined_table = combined.to_html(index=False, classes="data-table") if not combined.empty else ""
     pairwise_table = pairwise.head(50).to_html(index=False, classes="data-table") if not pairwise.empty else ""
     return f"""<!doctype html>
@@ -409,7 +405,7 @@ def _render_html(markdown: str, pairwise: pd.DataFrame, combined: pd.DataFrame) 
   </style>
 </head>
 <body>
-  <pre>{escaped_markdown}</pre>
+  {_html_markdown_details(markdown)}
   <h2>Two Feature Test</h2>
   {combined_table}
   <h2>Pairwise Tests</h2>
