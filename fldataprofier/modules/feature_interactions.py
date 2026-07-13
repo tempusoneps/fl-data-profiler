@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from fldataprofier.modules.base import ModuleResult
+from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.time_series_scoring import (
     build_result,
     impute_numeric_frame,
@@ -19,9 +20,15 @@ from fldataprofier.utils import _write_csv
 class FeatureInteractionsModule:
     name = "feature_interactions"
 
-    def __init__(self, max_base_features: int = 12, max_pairs: int = 80) -> None:
+    def __init__(
+        self,
+        max_base_features: int = 12,
+        max_pairs: int = 80,
+        progress: bool | None = None,
+    ) -> None:
         self.max_base_features = max_base_features
         self.max_pairs = max_pairs
+        self.progress = progress
 
     def run(
         self,
@@ -31,25 +38,41 @@ class FeatureInteractionsModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        prepared = load_prepared_data(feature_csv, label_csv, join_key, targets)
-        report_dir = output_dir / self.name
-        report_dir.mkdir(parents=True, exist_ok=True)
-        generated = _generate_interactions(prepared, self.max_base_features, self.max_pairs)
-        interaction_frame = pd.concat([prepared.merged, generated.drop(columns=["__meta__"], errors="ignore")], axis=1)
-        interaction_columns = [column for column in generated.columns if column != "__meta__"]
-        scores = mutual_information_scores(
-            interaction_frame,
-            interaction_columns,
-            prepared.target_columns,
-        )
-        metadata = pd.DataFrame(generated.attrs.get("metadata", []))
-        scores = scores.merge(metadata, left_on="feature", right_on="interaction", how="left")
-        artifacts = [
-            _write_csv(report_dir / "generated_interactions.csv", metadata),
-            _write_csv(report_dir / "feature_scores.csv", scores),
-            _write_csv(report_dir / "top_features.csv", scores.head(50)),
-        ]
-        return build_result(report_dir, self.name, feature_csv, label_csv, prepared, scores, artifacts)
+        with ModuleProgress(self.name, total=5, enabled=self.progress) as progress_bar:
+            prepared = load_prepared_data(feature_csv, label_csv, join_key, targets)
+            report_dir = output_dir / self.name
+            report_dir.mkdir(parents=True, exist_ok=True)
+            progress_bar.step("load")
+            generated = _generate_interactions(prepared, self.max_base_features, self.max_pairs)
+            progress_bar.step("generate")
+            interaction_frame = pd.concat([prepared.merged, generated.drop(columns=["__meta__"], errors="ignore")], axis=1)
+            interaction_columns = [column for column in generated.columns if column != "__meta__"]
+            scores = mutual_information_scores(
+                interaction_frame,
+                interaction_columns,
+                prepared.target_columns,
+            )
+            metadata = pd.DataFrame(generated.attrs.get("metadata", []))
+            scores = scores.merge(metadata, left_on="feature", right_on="interaction", how="left")
+            progress_bar.step("score")
+            artifacts = [
+                _write_csv(report_dir / "generated_interactions.csv", metadata),
+                _write_csv(report_dir / "feature_scores.csv", scores),
+                _write_csv(report_dir / "top_features.csv", scores.head(50)),
+            ]
+            progress_bar.step("artifacts")
+            result = build_result(
+                report_dir,
+                self.name,
+                feature_csv,
+                label_csv,
+                prepared,
+                scores,
+                artifacts,
+                {"progress_enabled": progress_bar.enabled},
+            )
+            progress_bar.step("write")
+            return result
 
 
 def _generate_interactions(prepared, max_base_features: int, max_pairs: int) -> pd.DataFrame:

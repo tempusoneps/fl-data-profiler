@@ -8,6 +8,7 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
 
 from fldataprofier.modules.base import ModuleResult
+from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.time_series_scoring import (
     build_result,
     impute_numeric_frame,
@@ -21,9 +22,15 @@ from fldataprofier.utils import _numeric_series, _write_csv
 class LightGBMModule:
     name = "lightgbm"
 
-    def __init__(self, n_estimators: int = 100, random_state: int = 42) -> None:
+    def __init__(
+        self,
+        n_estimators: int = 100,
+        random_state: int = 42,
+        progress: bool | None = None,
+    ) -> None:
         self.n_estimators = n_estimators
         self.random_state = random_state
+        self.progress = progress
 
     def run(
         self,
@@ -33,24 +40,34 @@ class LightGBMModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        prepared = load_prepared_data(feature_csv, label_csv, join_key, targets)
-        report_dir = output_dir / self.name
-        report_dir.mkdir(parents=True, exist_ok=True)
-        scores, backend = _gbm_scores(prepared, self.n_estimators, self.random_state)
-        artifacts = [
-            _write_csv(report_dir / "feature_scores.csv", scores),
-            _write_csv(report_dir / "top_features.csv", scores.head(50)),
-        ]
-        return build_result(
-            report_dir,
-            self.name,
-            feature_csv,
-            label_csv,
-            prepared,
-            scores,
-            artifacts,
-            {"backend": backend, "n_estimators": self.n_estimators},
-        )
+        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+            prepared = load_prepared_data(feature_csv, label_csv, join_key, targets)
+            report_dir = output_dir / self.name
+            report_dir.mkdir(parents=True, exist_ok=True)
+            progress_bar.step("load")
+            scores, backend = _gbm_scores(prepared, self.n_estimators, self.random_state)
+            progress_bar.step("score")
+            artifacts = [
+                _write_csv(report_dir / "feature_scores.csv", scores),
+                _write_csv(report_dir / "top_features.csv", scores.head(50)),
+            ]
+            progress_bar.step("artifacts")
+            result = build_result(
+                report_dir,
+                self.name,
+                feature_csv,
+                label_csv,
+                prepared,
+                scores,
+                artifacts,
+                {
+                    "backend": backend,
+                    "n_estimators": self.n_estimators,
+                    "progress_enabled": progress_bar.enabled,
+                },
+            )
+            progress_bar.step("write")
+            return result
 
 
 def _gbm_scores(prepared, n_estimators: int, random_state: int) -> tuple[pd.DataFrame, str]:

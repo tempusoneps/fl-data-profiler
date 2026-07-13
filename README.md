@@ -68,7 +68,7 @@ KMeans GPU module dùng RAPIDS cuML KMeans cho cùng kiểu report, tối ưu pr
 fldataprofier fit feature.parquet label.parquet --module kmeans_gpu
 ```
 
-Feature scoring modules: `information_coefficient`, `permutation_importance_ts`, `timeseries_importance`, `mutual_information`, `mrmr`, `stability_selection`, `regularized_linear`, `lightgbm`, `feature_interactions`, `regime_scoring`. Các module này tạo `feature_scores.csv`, `top_features.csv`, `summary.json`, `report.md` và `report.html` để tìm feature có giá trị dự đoán label.
+Feature scoring modules: `information_coefficient`, `permutation_importance_ts`, `timeseries_importance`, `mutual_information`, `mrmr`, `stability_selection`, `regularized_linear`, `lightgbm`, `feature_interactions`, `regime_scoring`. Các module này tạo `feature_scores.csv`, `top_features.csv`, `summary.json`, `report.md` và `report.html` để tìm feature có giá trị dự đoán label. Progress bar `tqdm` tự bật khi chạy trong terminal và được chia theo các phase như load, score, aggregate/combine và write.
 
 Mặc định output được ghi vào `reports/<module>/`, ví dụ `reports/statistics/` hoặc `reports/scipy/`. Có thể đổi thư mục output hoặc khóa join:
 

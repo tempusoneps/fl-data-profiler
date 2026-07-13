@@ -23,6 +23,7 @@ from sklearn.preprocessing import LabelEncoder
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
+    _html_markdown_details,
     _read_table_with_date_index,
     _date_columns,
     _markdown_table,
@@ -411,11 +412,6 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, model_results: pd.DataFrame, selections: pd.DataFrame) -> str:
-    escaped_markdown = (
-        markdown.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
     scores = model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
     top_features = (
         selections.groupby("label", group_keys=False).head(30).to_html(index=False, classes="data-table")
@@ -436,7 +432,7 @@ def _render_html(markdown: str, model_results: pd.DataFrame, selections: pd.Data
   </style>
 </head>
 <body>
-  <pre>{escaped_markdown}</pre>
+  {_html_markdown_details(markdown)}
   <h2>Model Scores</h2>
   {scores}
   <h2>Feature Decisions</h2>

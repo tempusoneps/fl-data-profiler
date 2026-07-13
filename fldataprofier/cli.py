@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fldataprofier.registry import get_module, list_modules
 from fldataprofier.utils import (
+    _input_row_limit,
     _is_supported_input_path,
     _supported_input_formats_message,
 )
@@ -41,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Label column to focus on. Can be passed multiple times. Defaults to all label columns.",
     )
+    fit.add_argument(
+        "--limit",
+        type=_positive_int,
+        help="Limit both feature and label inputs to the first N rows before generating the report.",
+    )
 
     return parser
 
@@ -53,19 +59,30 @@ def main(argv: list[str] | None = None) -> int:
         _validate_input_path(parser, "feature_csv", args.feature_csv)
         _validate_input_path(parser, "label_csv", args.label_csv)
         module = get_module(args.module)
-        result = module.run(
-            feature_csv=args.feature_csv,
-            label_csv=args.label_csv,
-            output_dir=args.output_dir,
-            join_key=args.join_key,
-            targets=args.target,
-        )
+        with _input_row_limit(args.limit):
+            result = module.run(
+                feature_csv=args.feature_csv,
+                label_csv=args.label_csv,
+                output_dir=args.output_dir,
+                join_key=args.join_key,
+                targets=args.target,
+            )
         print(f"Report written to: {result.report_dir}")
         for artifact in result.artifacts:
             print(f"- {artifact}")
         return 0
 
     raise ValueError(f"Unsupported command: {args.command}")
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--limit must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("--limit must be a positive integer")
+    return parsed
 
 
 def _validate_input_path(parser: argparse.ArgumentParser, name: str, path: Path) -> None:

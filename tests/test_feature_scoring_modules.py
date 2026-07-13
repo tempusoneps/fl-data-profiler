@@ -119,7 +119,7 @@ class FeatureScoringModuleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             feature_csv, label_csv = make_signal_dataset(tmp_path)
-            with patch("fldataprofier.modules.timeseries_importance.tqdm", fake_tqdm):
+            with patch("fldataprofier.modules.progress.tqdm", fake_tqdm):
                 TimeSeriesImportanceModule(
                     n_estimators=5,
                     random_state=11,
@@ -130,6 +130,65 @@ class FeatureScoringModuleTests(unittest.TestCase):
         self.assertEqual(5, progress_instances[0].kwargs["total"])
         self.assertFalse(progress_instances[0].kwargs["disable"])
         self.assertEqual([1, 1, 1, 1, 1], progress_instances[0].updates)
+
+    def test_all_feature_scoring_modules_use_shared_progress_when_enabled(self) -> None:
+        class FakeProgress:
+            def __init__(self, *args, **kwargs) -> None:
+                self.args = args
+                self.kwargs = kwargs
+                self.updates: list[int] = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback) -> bool:
+                return False
+
+            def set_postfix_str(self, value: str) -> None:
+                self.postfix = value
+
+            def update(self, value: int) -> None:
+                self.updates.append(value)
+
+        module_cases = [
+            ("fldataprofier.modules.information_coefficient", "InformationCoefficientModule", {}),
+            ("fldataprofier.modules.permutation_importance_ts", "PermutationImportanceTSModule", {"n_estimators": 5, "random_state": 7}),
+            ("fldataprofier.modules.timeseries_importance", "TimeSeriesImportanceModule", {"n_estimators": 5, "random_state": 11}),
+            ("fldataprofier.modules.mutual_information", "MutualInformationModule", {}),
+            ("fldataprofier.modules.mrmr", "MRMRModule", {"max_features": 10, "random_state": 3}),
+            ("fldataprofier.modules.stability_selection", "StabilitySelectionModule", {"n_resamples": 3, "random_state": 13}),
+            ("fldataprofier.modules.regularized_linear", "RegularizedLinearModule", {"random_state": 17}),
+            ("fldataprofier.modules.lightgbm", "LightGBMModule", {"n_estimators": 5, "random_state": 19}),
+            ("fldataprofier.modules.feature_interactions", "FeatureInteractionsModule", {"max_base_features": 4, "max_pairs": 6}),
+            ("fldataprofier.modules.regime_scoring", "RegimeScoringModule", {"n_regimes": 3}),
+        ]
+
+        progress_instances: list[FakeProgress] = []
+
+        def fake_tqdm(*args, **kwargs):
+            progress = FakeProgress(*args, **kwargs)
+            progress_instances.append(progress)
+            return progress
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            feature_csv, label_csv = make_signal_dataset(tmp_path)
+            with patch("fldataprofier.modules.progress.tqdm", fake_tqdm):
+                for module_path, class_name, kwargs in module_cases:
+                    with self.subTest(module=module_path):
+                        module = __import__(module_path, fromlist=[class_name])
+                        module_class = getattr(module, class_name)
+                        module_class(**kwargs, progress=True).run(
+                            feature_csv,
+                            label_csv,
+                            tmp_path / "out",
+                        )
+
+        self.assertEqual(len(module_cases), len(progress_instances))
+        for progress in progress_instances:
+            self.assertGreaterEqual(progress.kwargs["total"], 4)
+            self.assertFalse(progress.kwargs["disable"])
+            self.assertEqual(progress.kwargs["total"], sum(progress.updates))
 
     def test_remaining_feature_selection_modules_write_scores(self) -> None:
         module_cases = [

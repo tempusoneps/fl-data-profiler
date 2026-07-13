@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import html
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +12,17 @@ import pandas as pd
 
 
 SUPPORTED_INPUT_SUFFIXES = (".csv", ".parquet")
+_INPUT_ROW_LIMIT: ContextVar[int | None] = ContextVar("fldataprofier_input_row_limit", default=None)
+
+
+@contextmanager
+def _input_row_limit(limit: int | None) -> Iterator[None]:
+    token = _INPUT_ROW_LIMIT.set(limit)
+    try:
+        yield
+    finally:
+        _INPUT_ROW_LIMIT.reset(token)
+
 
 
 MODEL_RESULT_COLUMNS = [
@@ -37,10 +52,13 @@ def _supported_input_formats_message() -> str:
 
 def _read_table(path: Path) -> pd.DataFrame:
     suffix = path.suffix.lower()
+    limit = _INPUT_ROW_LIMIT.get()
     if suffix == ".csv":
-        frame = pd.read_csv(path, low_memory=False)
+        frame = pd.read_csv(path, low_memory=False, nrows=limit)
     elif suffix == ".parquet":
         frame = pd.read_parquet(path)
+        if limit is not None:
+            frame = frame.head(limit)
     else:
         raise ValueError(f"Unsupported input file type for {path}. Expected {_supported_input_formats_message()}.")
 
@@ -205,6 +223,14 @@ def _markdown_table(frame: pd.DataFrame) -> str:
     separator = ["-" * width for width in widths]
     return "\n".join([render_row(columns), render_row(separator), *[render_row(row) for row in body]])
 
+
+
+def _html_markdown_details(markdown: str) -> str:
+    escaped = html.escape(markdown)
+    return f'''<details class="markdown-source">
+  <summary>Markdown source</summary>
+  <pre>{escaped}</pre>
+</details>'''
 
 def _markdown_cell(value: object) -> str:
     if value is None or (isinstance(value, float) and np.isnan(value)):

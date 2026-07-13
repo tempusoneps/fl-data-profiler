@@ -13,8 +13,10 @@ import numpy as np
 import pandas as pd
 
 from fldataprofier.modules.base import ModuleResult
+from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
+    _html_markdown_details,
     _read_table,
     _markdown_table,
     _numeric_series,
@@ -40,6 +42,9 @@ class EdaRunMetadata:
 class EdaModule:
     name = "eda"
 
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
+
     def run(
         self,
         feature_csv: Path,
@@ -48,70 +53,71 @@ class EdaModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        features = _read_table(feature_csv)
-        labels = _read_table(label_csv)
+        with ModuleProgress(self.name, total=7, enabled=self.progress) as progress_bar:
+            features = _read_table(feature_csv)
+            labels = _read_table(label_csv)
+            progress_bar.step("load")
 
-        selected_labels = _select_label_columns(labels, targets)
+            selected_labels = _select_label_columns(labels, targets)
+            progress_bar.step("select")
 
-        run_dir = output_dir / self.name
-        run_dir.mkdir(parents=True, exist_ok=True)
+            run_dir = output_dir / self.name
+            run_dir.mkdir(parents=True, exist_ok=True)
 
-        metadata = EdaRunMetadata(
-            module=self.name,
-            created_at=datetime.now(timezone.utc).isoformat(),
-            feature_csv=str(feature_csv),
-            label_csv=str(label_csv),
-            feature_shape=DatasetShape(*features.shape),
-            label_shape=DatasetShape(*labels.shape),
-        )
+            metadata = EdaRunMetadata(
+                module=self.name,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                feature_csv=str(feature_csv),
+                label_csv=str(label_csv),
+                feature_shape=DatasetShape(*features.shape),
+                label_shape=DatasetShape(*labels.shape),
+            )
 
-        overview = _dataset_overview(
-            {"feature": features, "label": selected_labels}
-        )
-        column_profile = _column_profile(
-            {"feature": features, "label": selected_labels}
-        )
-        missingness = _missingness(column_profile)
-        numeric_summary = _numeric_summary(
-            {"feature": features, "label": selected_labels}
-        )
-        categorical_summary = _categorical_summary(
-            {"feature": features, "label": selected_labels}
-        )
+            overview = _dataset_overview({"feature": features, "label": selected_labels})
+            column_profile = _column_profile({"feature": features, "label": selected_labels})
+            missingness = _missingness(column_profile)
+            progress_bar.step("profile")
 
-        artifacts = [
-            _write_json(
-                run_dir / "summary.json",
-                {
-                    "metadata": asdict(metadata),
-                    "overview": overview.to_dict(orient="records"),
-                    "top_missing_columns": missingness.head(25).to_dict(orient="records"),
-                    "numeric_summary": numeric_summary.to_dict(orient="records"),
-                    "categorical_summary": categorical_summary.to_dict(orient="records"),
-                    "notes": _run_notes(join_key, targets),
-                },
-            ),
-            _write_csv(run_dir / "dataset_overview.csv", overview),
-            _write_csv(run_dir / "columns_profile.csv", column_profile),
-            _write_csv(run_dir / "missingness.csv", missingness),
-            _write_csv(run_dir / "numeric_summary.csv", numeric_summary),
-            _write_csv(run_dir / "categorical_summary.csv", categorical_summary),
-        ]
+            numeric_summary = _numeric_summary({"feature": features, "label": selected_labels})
+            categorical_summary = _categorical_summary({"feature": features, "label": selected_labels})
+            progress_bar.step("summaries")
 
-        feature_heatmap = run_dir / "feature_correlation_heatmap.png"
-        label_heatmap = run_dir / "label_correlation_heatmap.png"
-        _write_correlation_heatmap(feature_heatmap, features, "Feature numeric correlation")
-        _write_correlation_heatmap(label_heatmap, selected_labels, "Label numeric correlation")
-        artifacts.extend([feature_heatmap, label_heatmap])
+            artifacts = [
+                _write_json(
+                    run_dir / "summary.json",
+                    {
+                        "metadata": asdict(metadata),
+                        "overview": overview.to_dict(orient="records"),
+                        "top_missing_columns": missingness.head(25).to_dict(orient="records"),
+                        "numeric_summary": numeric_summary.to_dict(orient="records"),
+                        "categorical_summary": categorical_summary.to_dict(orient="records"),
+                        "notes": _run_notes(join_key, targets),
+                    },
+                ),
+                _write_csv(run_dir / "dataset_overview.csv", overview),
+                _write_csv(run_dir / "columns_profile.csv", column_profile),
+                _write_csv(run_dir / "missingness.csv", missingness),
+                _write_csv(run_dir / "numeric_summary.csv", numeric_summary),
+                _write_csv(run_dir / "categorical_summary.csv", categorical_summary),
+            ]
+            progress_bar.step("write_tables")
 
-        markdown = _render_markdown(metadata, overview, column_profile, missingness, numeric_summary)
-        md_path = run_dir / "report.md"
-        md_path.write_text(markdown, encoding="utf-8")
-        artifacts.append(md_path)
+            feature_heatmap = run_dir / "feature_correlation_heatmap.png"
+            label_heatmap = run_dir / "label_correlation_heatmap.png"
+            _write_correlation_heatmap(feature_heatmap, features, "Feature numeric correlation")
+            _write_correlation_heatmap(label_heatmap, selected_labels, "Label numeric correlation")
+            artifacts.extend([feature_heatmap, label_heatmap])
+            progress_bar.step("heatmaps")
 
-        html_path = run_dir / "report.html"
-        html_path.write_text(_render_html(markdown, overview, missingness), encoding="utf-8")
-        artifacts.append(html_path)
+            markdown = _render_markdown(metadata, overview, column_profile, missingness, numeric_summary)
+            md_path = run_dir / "report.md"
+            md_path.write_text(markdown, encoding="utf-8")
+            artifacts.append(md_path)
+
+            html_path = run_dir / "report.html"
+            html_path.write_text(_render_html(markdown, overview, missingness), encoding="utf-8")
+            artifacts.append(html_path)
+            progress_bar.step("report")
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
 
@@ -346,7 +352,6 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, overview: pd.DataFrame, missingness: pd.DataFrame) -> str:
-    escaped_markdown = markdown.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     overview_table = overview.to_html(index=False, classes="data-table")
     missing_table = missingness.head(25).to_html(index=False, classes="data-table")
     return f"""<!doctype html>
@@ -364,7 +369,7 @@ def _render_html(markdown: str, overview: pd.DataFrame, missingness: pd.DataFram
   </style>
 </head>
 <body>
-  <pre>{escaped_markdown}</pre>
+  {_html_markdown_details(markdown)}
   <h2>Dataset Overview</h2>
   {overview_table}
   <h2>Top Missing Columns</h2>

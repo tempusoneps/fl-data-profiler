@@ -19,8 +19,10 @@ from sklearn.preprocessing import LabelEncoder
 from xgboost import XGBClassifier, XGBRegressor
 
 from fldataprofier.modules.base import ModuleResult
+from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
+    _html_markdown_details,
     _read_table_with_date_index,
     _date_columns,
     _markdown_table,
@@ -60,6 +62,9 @@ class XGBoostRunMetadata:
 class XGBoostRelationshipsModule:
     name = "xgboost"
 
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
+
     def run(
         self,
         feature_csv: Path,
@@ -81,11 +86,13 @@ class XGBoostRelationshipsModule:
         numeric_features = _numeric_feature_columns(merged, feature_columns)
 
         model_frame = _sample_rows(merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE)
-        model_results, importances = _fit_target_models(
-            model_frame,
-            numeric_features,
-            selected_targets,
-        )
+        with ModuleProgress(self.name, total=len(selected_targets), enabled=self.progress) as progress_bar:
+            model_results, importances = _fit_target_models(
+                model_frame,
+                numeric_features,
+                selected_targets,
+                progress_bar,
+            )
 
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -131,7 +138,10 @@ class XGBoostRelationshipsModule:
 
 
 def _fit_target_models(
-    merged: pd.DataFrame, feature_columns: list[str], label_columns: list[str]
+    merged: pd.DataFrame,
+    feature_columns: list[str],
+    label_columns: list[str],
+    progress_bar: ModuleProgress | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     result_rows: list[dict[str, object]] = []
     importance_rows: list[dict[str, object]] = []
@@ -156,6 +166,8 @@ def _fit_target_models(
         if result is not None:
             result_rows.append(result)
         importance_rows.extend(importance)
+        if progress_bar is not None:
+            progress_bar.step(label)
 
     return _model_results_frame(result_rows), _importance_frame(importance_rows)
 
@@ -337,11 +349,6 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, model_results: pd.DataFrame, importances: pd.DataFrame) -> str:
-    escaped_markdown = (
-        markdown.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
     scores = model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
     top_importance = (
         importances.groupby("label", group_keys=False).head(20).to_html(index=False, classes="data-table")
@@ -362,7 +369,7 @@ def _render_html(markdown: str, model_results: pd.DataFrame, importances: pd.Dat
   </style>
 </head>
 <body>
-  <pre>{escaped_markdown}</pre>
+  {_html_markdown_details(markdown)}
   <h2>Model Scores</h2>
   {scores}
   <h2>Top Feature Importance</h2>
