@@ -84,6 +84,7 @@ name = "fl-data-profiling"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "flaml" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
@@ -98,6 +99,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "flaml", specifier = ">=2.6.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pandas", specifier = ">=2.3.0,<3.0.0" },
@@ -108,6 +110,18 @@ requires-dist = [
     { name = "statsmodels", specifier = ">=0.14.6" },
     { name = "tqdm", specifier = ">=4.67.0" },
     { name = "xgboost", specifier = ">=3.0.0" },
+]
+
+[[package]]
+name = "flaml"
+version = "2.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c4/9a/ea9ad379febe29c83daaa31b04a659f107fcd12c667a5892480dda994bb6/flaml-2.6.0.tar.gz", hash = "sha256:fee0a8419d8a4862afe8aa817c312c7479f4d137b806430ecf3b3c7033270730", size = 315838, upload-time = "2026-04-28T02:03:27.021Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/a8/02a8f6f5f41bba6b288c30194090bcf179671df893f6cd358c6ee0727713/flaml-2.6.0-py3-none-any.whl", hash = "sha256:dee9fb17ed44802e63b0cb29edd7bd73d61533f2d23173e7f13704bfc017084e", size = 349675, upload-time = "2026-04-28T02:03:25.263Z" },
 ]
 
 [[package]]
