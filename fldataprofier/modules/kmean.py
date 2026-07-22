@@ -5,11 +5,15 @@ from datetime import datetime, timezone
 from itertools import combinations
 from pathlib import Path
 
+import warnings
+
 import numpy as np
 import pandas as pd
+
+warnings.filterwarnings("ignore", category=UserWarning)
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import KMeans
-from sklearn.feature_selection import f_classif
+from sklearn.feature_selection import mutual_info_classif
 from sklearn.metrics import (
     adjusted_rand_score,
     balanced_accuracy_score,
@@ -67,12 +71,13 @@ def _select_top_features_for_label(
     if label_values.nunique(dropna=True) < 2:
         return numeric_features[:top_k]
 
+    sample_frame = frame.iloc[:2500] if len(frame) > 2500 else frame
     encoder = LabelEncoder()
-    y = encoder.fit_transform(label_values)
-    x = frame[numeric_features].apply(_numeric_series).fillna(0.0).to_numpy()
+    y = encoder.fit_transform(sample_frame[label].astype(str))
+    x = sample_frame[numeric_features].apply(_numeric_series).fillna(0.0).to_numpy()
 
     try:
-        scores, _ = f_classif(x, y)
+        scores = mutual_info_classif(x, y, random_state=RANDOM_STATE)
         scores = np.nan_to_num(scores, nan=0.0)
         top_indices = np.argsort(scores)[::-1][:top_k]
         return [numeric_features[i] for i in top_indices]
