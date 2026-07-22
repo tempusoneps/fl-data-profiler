@@ -7,15 +7,20 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import KMeans
+from sklearn.feature_selection import f_classif
 from sklearn.metrics import (
     adjusted_rand_score,
+    balanced_accuracy_score,
     completeness_score,
+    f1_score,
     homogeneity_score,
     normalized_mutual_info_score,
     silhouette_score,
     v_measure_score,
 )
+from sklearn.metrics.cluster import contingency_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
@@ -31,7 +36,6 @@ from fldataprofier.utils import (
     _numeric_feature_columns,
     _numeric_series,
     _round,
-    _sample_rows,
     _select_targets,
     _write_csv,
     _write_json,
@@ -43,6 +47,76 @@ MAX_LABEL_CLASSES = 50
 MIN_SAMPLES = 20
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
+MAX_TOP_FEATURES_PER_LABEL = 30
+MAX_PAIR_CORRELATION = 0.90
+
+
+def _select_top_features_for_label(
+    df: pd.DataFrame,
+    numeric_features: list[str],
+    label: str,
+    top_k: int = MAX_TOP_FEATURES_PER_LABEL,
+) -> list[str]:
+    if len(numeric_features) <= top_k:
+        return numeric_features
+    frame = df[[*numeric_features, label]].dropna()
+    if len(frame) < MIN_SAMPLES:
+        return numeric_features[:top_k]
+
+    label_values = frame[label].astype(str)
+    if label_values.nunique(dropna=True) < 2:
+        return numeric_features[:top_k]
+
+    encoder = LabelEncoder()
+    y = encoder.fit_transform(label_values)
+    x = frame[numeric_features].apply(_numeric_series).fillna(0.0).to_numpy()
+
+    try:
+        scores, _ = f_classif(x, y)
+        scores = np.nan_to_num(scores, nan=0.0)
+        top_indices = np.argsort(scores)[::-1][:top_k]
+        return [numeric_features[i] for i in top_indices]
+    except Exception:
+        return numeric_features[:top_k]
+
+
+def _select_sequential_rows(frame: pd.DataFrame, max_rows: int) -> pd.DataFrame:
+    if len(frame) <= max_rows:
+        return frame
+    return frame.iloc[:max_rows]
+
+
+def _map_clusters_to_labels(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
+    if len(y_true) == 0:
+        return y_pred
+    cm = contingency_matrix(y_true, y_pred)
+    row_ind, col_ind = linear_sum_assignment(-cm)
+    mapping = {col: row for row, col in zip(row_ind, col_ind)}
+    return np.array([mapping.get(c, c) for c in y_pred])
+
+
+def _clustering_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    if len(y_true) == 0:
+        return 0.0
+    cm = contingency_matrix(y_true, y_pred)
+    row_ind, col_ind = linear_sum_assignment(-cm)
+    matched_count = cm[row_ind, col_ind].sum()
+    return float(matched_count / len(y_true))
+
+
+def _clustering_balanced_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    if len(y_true) == 0:
+        return 0.0
+    mapped_pred = _map_clusters_to_labels(y_true, y_pred)
+    return float(balanced_accuracy_score(y_true, mapped_pred))
+
+
+def _clustering_f1_weighted(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    if len(y_true) == 0:
+        return 0.0
+    mapped_pred = _map_clusters_to_labels(y_true, y_pred)
+    return float(f1_score(y_true, mapped_pred, average="weighted", zero_division=0))
+
 
 
 @dataclass(frozen=True)
@@ -90,18 +164,25 @@ class KMeanRelationshipsModule:
 
         numeric_features = _numeric_feature_columns(merged, feature_columns)
         categorical_labels = _categorical_label_columns(merged, selected_targets)
-        model_frame = _sample_rows(
+        model_frame = _select_sequential_rows(
             merged[[*numeric_features, *categorical_labels]],
             MAX_ROWS,
-            RANDOM_STATE,
         )
 
-        feature_pairs = list(combinations(numeric_features, 2))
-        combinations_count = len(feature_pairs) * len(categorical_labels)
-        with ModuleProgress(self.name, total=combinations_count, enabled=self.progress) as progress_bar:
+        label_pairs_map: dict[str, list[tuple[str, str]]] = {}
+        total_combinations = 0
+        for label in categorical_labels:
+            top_feats = _select_top_features_for_label(
+                model_frame, numeric_features, label, MAX_TOP_FEATURES_PER_LABEL
+            )
+            pairs = list(combinations(top_feats, 2))
+            label_pairs_map[label] = pairs
+            total_combinations += len(pairs)
+
+        with ModuleProgress(self.name, total=total_combinations, enabled=self.progress) as progress_bar:
             results, cluster_distribution = _fit_kmeans_reports(
                 model_frame,
-                feature_pairs,
+                label_pairs_map,
                 categorical_labels,
                 progress_bar,
             )
@@ -122,8 +203,8 @@ class KMeanRelationshipsModule:
             numeric_features=numeric_features,
             categorical_labels=categorical_labels,
             ignored_columns=ignored_columns,
-            feature_pairs=len(feature_pairs),
-            combinations=combinations_count,
+            feature_pairs=sum(len(p) for p in label_pairs_map.values()),
+            combinations=total_combinations,
         )
 
         numeric_features_frame = pd.DataFrame({"feature": numeric_features})
@@ -188,19 +269,33 @@ def _label_profile_frame(merged: pd.DataFrame, labels: list[str]) -> pd.DataFram
 
 def _fit_kmeans_reports(
     merged: pd.DataFrame,
-    feature_pairs: list[tuple[str, str]],
+    label_pairs_map: dict[str, list[tuple[str, str]]] | list[tuple[str, str]],
     label_columns: list[str],
     progress_bar: ModuleProgress | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     result_rows: list[dict[str, object]] = []
     distribution_rows: list[dict[str, object]] = []
 
-    for feature_1, feature_2 in feature_pairs:
-        x = merged[[feature_1, feature_2]].apply(_numeric_series)
-        for label in label_columns:
-            result, distribution = _fit_single_kmeans(feature_1, feature_2, label, x, merged[label])
-            result_rows.append(result)
-            distribution_rows.extend(distribution)
+    for label in label_columns:
+        pairs = label_pairs_map.get(label, []) if isinstance(label_pairs_map, dict) else label_pairs_map
+        if not pairs:
+            continue
+        unique_features = list({feat for pair in pairs for feat in pair})
+        sub_df = merged[unique_features].apply(_numeric_series)
+        corr_matrix = sub_df.corr().abs()
+
+        for feature_1, feature_2 in pairs:
+            corr_val = corr_matrix.loc[feature_1, feature_2] if (feature_1 in corr_matrix and feature_2 in corr_matrix) else 0.0
+            if not np.isnan(corr_val) and corr_val > MAX_PAIR_CORRELATION:
+                result_rows.append(
+                    _skipped_result(feature_1, feature_2, label, len(merged), "high_feature_correlation")
+                )
+            else:
+                x = merged[[feature_1, feature_2]].apply(_numeric_series)
+                result, distribution = _fit_single_kmeans(feature_1, feature_2, label, x, merged[label])
+                result_rows.append(result)
+                distribution_rows.extend(distribution)
+
             if progress_bar is not None:
                 progress_bar.step(f"{feature_1}+{feature_2}->{label}")
 
@@ -231,17 +326,10 @@ def _fit_single_kmeans(
 
     encoder = LabelEncoder()
     encoded = encoder.fit_transform(label_values)
-    class_sizes = np.bincount(encoded)
-    stratify = (
-        encoded
-        if np.min(class_sizes) >= 2 and test_count >= class_count and train_count >= class_count
-        else None
-    )
     train_frame, test_frame = train_test_split(
         frame,
         test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-        stratify=stratify,
+        shuffle=False,
     )
 
     scaler = StandardScaler()
@@ -256,7 +344,7 @@ def _fit_single_kmeans(
             "not_enough_distinct_points_for_clusters",
         ), []
 
-    model = KMeans(n_clusters=class_count, n_init=10, random_state=RANDOM_STATE)
+    model = KMeans(n_clusters=class_count, n_init=1, random_state=RANDOM_STATE)
     model.fit(train_x)
     train_clusters = model.predict(train_x)
     test_clusters = model.predict(test_x)
@@ -282,6 +370,12 @@ def _fit_single_kmeans(
             "test_samples": int(len(test_frame)),
             "label_classes": int(class_count),
             "clusters": int(class_count),
+            "train_accuracy": _round(float(_clustering_accuracy(train_labels, train_clusters) * 100)),
+            "test_accuracy": _round(float(_clustering_accuracy(test_labels, test_clusters) * 100)),
+            "train_balanced_accuracy": _round(float(_clustering_balanced_accuracy(train_labels, train_clusters) * 100)),
+            "test_balanced_accuracy": _round(float(_clustering_balanced_accuracy(test_labels, test_clusters) * 100)),
+            "train_f1_weighted": _round(float(_clustering_f1_weighted(train_labels, train_clusters) * 100)),
+            "test_f1_weighted": _round(float(_clustering_f1_weighted(test_labels, test_clusters) * 100)),
             "train_adjusted_rand": _round(float(adjusted_rand_score(train_labels, train_clusters))),
             "test_adjusted_rand": _round(float(adjusted_rand_score(test_labels, test_clusters))),
             "train_normalized_mutual_info": _round(float(normalized_mutual_info_score(train_labels, train_clusters))),
@@ -314,6 +408,12 @@ def _skipped_result(
         "test_samples": 0,
         "label_classes": None,
         "clusters": None,
+        "train_accuracy": None,
+        "test_accuracy": None,
+        "train_balanced_accuracy": None,
+        "test_balanced_accuracy": None,
+        "train_f1_weighted": None,
+        "test_f1_weighted": None,
         "train_adjusted_rand": None,
         "test_adjusted_rand": None,
         "train_normalized_mutual_info": None,
@@ -327,11 +427,33 @@ def _skipped_result(
     }
 
 
+MAX_SILHOUETTE_SAMPLES = 1_000
+
+
 def _safe_silhouette(features: np.ndarray, clusters: np.ndarray) -> float | None:
     unique_clusters = np.unique(clusters)
     if len(unique_clusters) < 2 or len(unique_clusters) >= len(features):
         return None
-    return _round(float(silhouette_score(features, clusters)))
+    sample_features, sample_clusters = _silhouette_sample(
+        features,
+        clusters,
+        MAX_SILHOUETTE_SAMPLES,
+        RANDOM_STATE,
+    )
+    return _round(float(silhouette_score(sample_features, sample_clusters)))
+
+
+def _silhouette_sample(
+    features: np.ndarray,
+    clusters: np.ndarray,
+    max_samples: int,
+    random_state: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if len(features) <= max_samples:
+        return features, clusters
+    rng = np.random.defaultrng(random_state)
+    indices = np.sort(rng.choice(len(features), size=max_samples, replace=False))
+    return features[indices], clusters[indices]
 
 
 def _distinct_row_count(values: np.ndarray) -> int:
@@ -375,6 +497,12 @@ def _results_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
         "test_samples",
         "label_classes",
         "clusters",
+        "train_accuracy",
+        "test_accuracy",
+        "train_balanced_accuracy",
+        "test_balanced_accuracy",
+        "train_f1_weighted",
+        "test_f1_weighted",
         "train_adjusted_rand",
         "test_adjusted_rand",
         "train_normalized_mutual_info",
@@ -409,10 +537,11 @@ def _ranked_successful(results: pd.DataFrame) -> pd.DataFrame:
     if successful.empty:
         return successful
     return successful.sort_values(
-        ["test_adjusted_rand", "test_normalized_mutual_info", "samples"],
-        ascending=[False, False, False],
+        ["test_balanced_accuracy", "test_f1_weighted", "test_accuracy", "test_adjusted_rand", "samples"],
+        ascending=[False, False, False, False, False],
         na_position="last",
     ).reset_index(drop=True)
+
 
 
 def _render_markdown(
