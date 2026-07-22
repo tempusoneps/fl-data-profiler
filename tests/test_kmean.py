@@ -100,6 +100,24 @@ class KMeanTests(unittest.TestCase):
         self.assertEqual([1, 1, 1, 1, 1, 1], progress_instances[0].updates)
         self.assertEqual(6, len(progress_instances[0].postfixes))
 
+    def test_clustering_accuracy_computes_optimal_matching_accuracy(self) -> None:
+        import numpy as np
+        from fldataprofier.modules.kmean import _clustering_accuracy
+
+        y_true = np.array([0, 0, 0, 1, 1, 1])
+        y_pred_perfect = np.array([1, 1, 1, 0, 0, 0])
+        self.assertAlmostEqual(1.0, _clustering_accuracy(y_true, y_pred_perfect))
+
+        y_pred_imperfect = np.array([1, 1, 0, 0, 0, 0])
+        self.assertAlmostEqual(5 / 6, _clustering_accuracy(y_true, y_pred_imperfect))
+
+    def test_select_sequential_rows_preserves_contiguous_order(self) -> None:
+        from fldataprofier.modules.kmean import _select_sequential_rows
+
+        df = pd.DataFrame({"a": range(100)})
+        selected = _select_sequential_rows(df, 10)
+        self.assertEqual(list(range(10)), selected["a"].tolist())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,9 @@ description = "Feature/label relationship profiling reports"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "autofcholv",
     "flaml>=2.6.0",
+    "labelohlcv",
     "matplotlib>=3.10.8",
     "numpy>=2.2.6",
     "pandas>=2.3.0,<3.0.0",
@@ -27,3 +29,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["fldataprofier"]
+
+[tool.uv.sources]
+autofcholv = { git = "https://github.com/tempusoneps/autofcholv.git", branch = "develop" }
+labelohlcv = { git = "https://github.com/tempusoneps/labelohlcv.git", branch = "develop" }

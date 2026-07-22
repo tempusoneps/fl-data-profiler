@@ -8,7 +8,6 @@ from fldataprofier.modules.feature_interactions import FeatureInteractionsModule
 from fldataprofier.modules.flaml_module import FLAMLRelationshipsModule
 from fldataprofier.modules.information_coefficient import InformationCoefficientModule
 from fldataprofier.modules.kmean import KMeanRelationshipsModule
-from fldataprofier.modules.kmeans_gpu import KMeansGpuRelationshipsModule
 from fldataprofier.modules.lightgbm import LightGBMModule
 from fldataprofier.modules.mrmr import MRMRModule
 from fldataprofier.modules.mutual_information import MutualInformationModule
@@ -34,7 +33,6 @@ _MODULES: dict[str, ProfilingModule] = {
     "flaml": FLAMLRelationshipsModule(),
     "information_coefficient": InformationCoefficientModule(),
     "kmean": KMeanRelationshipsModule(),
-    "kmeans_gpu": KMeansGpuRelationshipsModule(),
     "lightgbm": LightGBMModule(),
     "mrmr": MRMRModule(),
     "mutual_information": MutualInformationModule(),
