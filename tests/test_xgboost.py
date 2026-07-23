@@ -46,7 +46,9 @@ class XGBoostTests(unittest.TestCase):
                     "model": "FakeXGBClassifier",
                     "samples": int(len(target)),
                     "features": int(len(features.columns)),
+                    "score_train": 1.0,
                     "score_primary": 1.0,
+                    "overfit_gap": 0.0,
                     "score_primary_name": "balanced_accuracy",
                     "mae": None,
                     "rmse": None,
@@ -56,6 +58,8 @@ class XGBoostTests(unittest.TestCase):
                     "note": "fake",
                 },
                 [],
+                [],
+                ([], None),
             )
 
         with tempfile.TemporaryDirectory() as tmp:
