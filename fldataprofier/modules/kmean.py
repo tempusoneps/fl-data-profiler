@@ -456,7 +456,7 @@ def _silhouette_sample(
 ) -> tuple[np.ndarray, np.ndarray]:
     if len(features) <= max_samples:
         return features, clusters
-    rng = np.random.defaultrng(random_state)
+    rng = np.random.default_rng(random_state)
     indices = np.sort(rng.choice(len(features), size=max_samples, replace=False))
     return features[indices], clusters[indices]
 
