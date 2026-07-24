@@ -256,16 +256,16 @@ def _fit_target_models(
 def _fit_regression(
     label: str, features: pd.DataFrame, target: pd.Series
 ) -> tuple[dict[str, object] | None, list[dict[str, object]], tuple[np.ndarray, np.ndarray]]:
-    frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
+    frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label]).sort_index()
     if len(frame) < 30 or frame[label].nunique() < 2:
         return None, [], (np.array([]), np.array([]))
 
-    x_train, x_test, y_train, y_test = train_test_split(
-        frame[features.columns],
-        frame[label],
-        test_size=0.2,
-        random_state=RANDOM_STATE,
-    )
+    split_idx = int(len(frame) * 0.8)
+    x_train = frame[features.columns].iloc[:split_idx]
+    x_test = frame[features.columns].iloc[split_idx:]
+    y_train = frame[label].iloc[:split_idx]
+    y_test = frame[label].iloc[split_idx:]
+
     model = XGBRegressor(
         objective="reg:squarederror",
         n_estimators=200,
@@ -318,7 +318,7 @@ def _fit_classification(
     list[dict[str, object]],
     tuple[list[str], np.ndarray | None],
 ]:
-    frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
+    frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label]).sort_index()
     class_count = int(frame[label].nunique(dropna=True))
     if len(frame) < 30 or class_count < 2 or class_count > MAX_CLASS_COUNT:
         return None, [], [], ([], None)
@@ -330,13 +330,11 @@ def _fit_classification(
     if np.min(class_sizes) < 2:
         return None, [], [], ([], None)
 
-    x_train, x_test, y_train, y_test = train_test_split(
-        frame[features.columns],
-        y,
-        test_size=0.2,
-        random_state=RANDOM_STATE,
-        stratify=y,
-    )
+    split_idx = int(len(frame) * 0.8)
+    x_train = frame[features.columns].iloc[:split_idx]
+    x_test = frame[features.columns].iloc[split_idx:]
+    y_train = y[:split_idx]
+    y_test = y[split_idx:]
     objective = "binary:logistic" if class_count == 2 else "multi:softprob"
     model = XGBClassifier(
         objective=objective,
@@ -363,7 +361,8 @@ def _fit_classification(
     importance = _feature_importance(label, features.columns, model.feature_importances_)
 
     # Per-class metrics
-    report = classification_report(y_test, test_preds, target_names=class_names, output_dict=True, zero_division=0)
+    all_labels = list(range(len(class_names)))
+    report = classification_report(y_test, test_preds, labels=all_labels, target_names=class_names, output_dict=True, zero_division=0)
     per_class_rows: list[dict[str, object]] = []
     for c_name in class_names:
         if c_name in report:
@@ -379,7 +378,7 @@ def _fit_classification(
                 }
             )
 
-    cm = confusion_matrix(y_test, test_preds)
+    cm = confusion_matrix(y_test, test_preds, labels=all_labels)
 
     return (
         {
