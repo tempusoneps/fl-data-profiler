@@ -11,7 +11,7 @@ resolution-markers = [
 [[package]]
 name = "autofcholv"
 version = "0.2.0"
-source = { git = "https://github.com/tempusoneps/autofcholv.git?branch=develop#f589111d1f461e774f976ae23fe14ff584eb7f2d" }
+source = { git = "https://github.com/tempusoneps/autofcholv.git?branch=develop#12655535c0fb456a6b38e9ad31993805e83884a7" }
 dependencies = [
     { name = "pandas" },
     { name = "pandas-ta" },
@@ -235,7 +235,7 @@ wheels = [
 [[package]]
 name = "labelohlcv"
 version = "0.1.0"
-source = { git = "https://github.com/tempusoneps/labelohlcv.git?branch=develop#a3752a31830145c90f6e873f38a884503e83f73c" }
+source = { git = "https://github.com/tempusoneps/labelohlcv.git?branch=develop#201b6f1a8a9967375158664a66b792574a0ea068" }
 dependencies = [
     { name = "pandas" },
     { name = "tqdm" },
