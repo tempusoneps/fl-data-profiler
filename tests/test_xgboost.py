@@ -98,6 +98,36 @@ class XGBoostTests(unittest.TestCase):
         self.assertEqual([1, 1], progress_instances[0].updates)
         self.assertEqual(["label_a", "label_b"], progress_instances[0].postfixes)
 
+    def test_categorical_and_numeric_features_passed(self) -> None:
+        from fldataprofier.modules.xgboost import XGBoostRelationshipsModule
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            rows = 50
+            features = pd.DataFrame(
+                {
+                    "num_feat": [float(i) for i in range(rows)],
+                    "cat_feat": ["cat_A" if i % 2 == 0 else "cat_B" for i in range(rows)],
+                }
+            )
+            labels = pd.DataFrame(
+                {
+                    "target_num": [float(i % 10) for i in range(rows)],
+                }
+            )
+            feat_path = tmp_path / "features.csv"
+            lbl_path = tmp_path / "labels.csv"
+            features.to_csv(feat_path, index=False)
+            labels.to_csv(lbl_path, index=False)
+
+            result = XGBoostRelationshipsModule(progress=False).run(
+                feat_path,
+                lbl_path,
+                tmp_path / "out",
+            )
+            self.assertTrue((tmp_path / "out" / "xgboost" / "report.md").exists())
+            self.assertTrue((tmp_path / "out" / "xgboost" / "scores.csv").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

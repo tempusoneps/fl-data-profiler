@@ -107,13 +107,13 @@ class XGBoostRelationshipsModule:
         feature_columns = [column for column in feature_columns if column not in ignored_columns]
         label_columns = [column for column in label_columns if column not in ignored_columns]
         selected_targets = _select_targets(label_columns, targets)
-        numeric_features = _numeric_feature_columns(merged, feature_columns)
+        valid_features = _all_valid_feature_columns(merged, feature_columns)
 
-        model_frame = _sample_rows(merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE)
+        model_frame = _sample_rows(merged[[*valid_features, *selected_targets]], MAX_ROWS, RANDOM_STATE)
         with ModuleProgress(self.name, total=len(selected_targets), enabled=self.progress) as progress_bar:
             model_results, importances, per_class_df, cm_dict, reg_preds_dict = _fit_target_models(
                 model_frame,
-                numeric_features,
+                valid_features,
                 selected_targets,
                 progress_bar,
             )
@@ -123,9 +123,10 @@ class XGBoostRelationshipsModule:
 
         # Generate PNG Charts
         chart_artifacts: list[Path] = []
-        top_chart_path = run_dir / "top_feature_importance.png"
-        if _write_top_features_chart(top_chart_path, importances):
-            chart_artifacts.append(top_chart_path)
+        for label in selected_targets:
+            imp_path = run_dir / f"importance_{label}.png"
+            if _write_per_label_importance_chart(imp_path, label, importances):
+                chart_artifacts.append(imp_path)
 
         for label, (class_names, cm) in cm_dict.items():
             cm_path = run_dir / f"cm_{label}.png"
@@ -154,7 +155,7 @@ class XGBoostRelationshipsModule:
             label_shape=DatasetShape(*labels.shape),
             merged_shape=DatasetShape(*merged.shape),
             model_rows=len(model_frame),
-            features=numeric_features,
+            features=valid_features,
             targets=selected_targets,
             ignored_columns=ignored_columns,
         )
@@ -190,6 +191,30 @@ class XGBoostRelationshipsModule:
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
 
 
+def _all_valid_feature_columns(
+    merged: pd.DataFrame,
+    feature_columns: list[str],
+    min_non_null: int = 10,
+) -> list[str]:
+    columns: list[str] = []
+    for column in feature_columns:
+        s = merged[column]
+        if s.notna().sum() >= min_non_null and s.nunique(dropna=True) >= 2:
+            columns.append(column)
+    return columns
+
+
+def _prepare_feature_frame(merged: pd.DataFrame, feature_columns: list[str]) -> pd.DataFrame:
+    data_dict: dict[str, pd.Series] = {}
+    for col in feature_columns:
+        s = merged[col]
+        if pd.api.types.is_numeric_dtype(s.dtype):
+            data_dict[col] = _numeric_series(s)
+        else:
+            data_dict[col] = s.astype(str).astype("category")
+    return pd.DataFrame(data_dict, index=merged.index)
+
+
 def _fit_target_models(
     merged: pd.DataFrame,
     feature_columns: list[str],
@@ -217,7 +242,7 @@ def _fit_target_models(
             reg_preds_dict,
         )
 
-    x = merged[feature_columns].apply(_numeric_series)
+    x = _prepare_feature_frame(merged, feature_columns)
 
     for label in label_columns:
         y_raw = merged[label]
@@ -273,6 +298,8 @@ def _fit_regression(
         learning_rate=0.05,
         subsample=0.9,
         colsample_bytree=0.9,
+        enable_categorical=True,
+        tree_method="hist",
         random_state=RANDOM_STATE,
         n_jobs=-1,
         missing=np.nan,
@@ -343,6 +370,8 @@ def _fit_classification(
         learning_rate=0.05,
         subsample=0.9,
         colsample_bytree=0.9,
+        enable_categorical=True,
+        tree_method="hist",
         random_state=RANDOM_STATE,
         n_jobs=-1,
         missing=np.nan,
@@ -450,22 +479,21 @@ def _importance_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
-def _write_top_features_chart(path: Path, importances: pd.DataFrame) -> Path | None:
+def _write_per_label_importance_chart(
+    path: Path, label: str, importances: pd.DataFrame
+) -> Path | None:
     if importances.empty:
         return None
-    top = (
-        importances.groupby("feature")["importance"]
-        .mean()
-        .sort_values(ascending=False)
-        .head(15)
-        .sort_values(ascending=True)
-    )
-    if top.empty:
+    label_df = importances[importances["label"] == label]
+    if label_df.empty:
+        return None
+    top = label_df.sort_values("importance", ascending=False).head(15).sort_values("importance", ascending=True)
+    if top.empty or top["importance"].sum() == 0:
         return None
     fig, ax = plt.subplots(figsize=(9, 6))
-    ax.barh(top.index, top.values, color="#3182ce")
-    ax.set_title("Top 15 Feature Importances (Mean Gain across Targets)")
-    ax.set_xlabel("Mean Gain Importance")
+    ax.barh(top["feature"], top["importance"], color="#3182ce")
+    ax.set_title(f"Top 15 Feature Importances: {label}")
+    ax.set_xlabel("Gain Importance")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -554,14 +582,12 @@ def _generate_executive_insights(
         )
 
     if not importances.empty:
-        top_feats = (
-            importances.groupby("feature")["importance"]
-            .mean()
-            .sort_values(ascending=False)
-            .head(5)
-        )
-        feats_str = ", ".join([f"`{feat}` ({imp:.4f})" for feat, imp in top_feats.items()])
-        insights.append(f"⭐ **Top 5 Global Features**: {feats_str}.")
+        key_labels = model_results["label"].head(3).tolist() if not model_results.empty else []
+        for target_label in key_labels:
+            target_imps = importances[importances["label"] == target_label].head(3)
+            if not target_imps.empty:
+                top_3_str = ", ".join([f"`{row['feature']}` ({row['importance']:.4f})" for _, row in target_imps.iterrows()])
+                insights.append(f"⭐ **Top Features for `{target_label}`**: {top_3_str}.")
 
     if not per_class_df.empty:
         min_support_class = per_class_df.sort_values("support").iloc[0]
@@ -583,11 +609,13 @@ def _render_markdown(
 ) -> str:
     scores = _markdown_table(model_results) if not model_results.empty else "No XGBoost models were available."
     per_class_table = _markdown_table(per_class_df) if not per_class_df.empty else "No per-class metrics available."
-    top_importance = (
-        _markdown_table(importances.groupby("label", group_keys=False).head(10))
-        if not importances.empty
-        else "No feature importance was available."
-    )
+    top_importance_blocks: list[str] = []
+    if not importances.empty:
+        for lbl in metadata.targets:
+            lbl_df = importances[importances["label"] == lbl].head(10)
+            if not lbl_df.empty:
+                top_importance_blocks.append(f"### Feature Importance: `{lbl}`\n\n" + _markdown_table(lbl_df[["feature", "importance", "importance_name"]]))
+    top_importance = "\n\n".join(top_importance_blocks) if top_importance_blocks else "No feature importance was available."
     ignored = ", ".join(metadata.ignored_columns) if metadata.ignored_columns else "none"
 
     insights_text = "\n".join([f"- {insight}" for insight in insights]) if insights else "- No specific warnings."
@@ -615,7 +643,7 @@ def _render_markdown(
 - Merged shape: {metadata.merged_shape.rows} rows x {metadata.merged_shape.columns} columns
 - Model rows: {metadata.model_rows}
 - Ignored columns: {ignored}
-- Numeric features: {len(metadata.features)}
+- Evaluated features: {len(metadata.features)}
 - Targets: {", ".join(metadata.targets)}
 
 ## Model Scores (Train vs Test Performance)
