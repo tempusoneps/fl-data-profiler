@@ -17,6 +17,7 @@ from fldataprofier.modules.regime_scoring import RegimeScoringModule
 from fldataprofier.modules.regularized_linear import RegularizedLinearModule
 from fldataprofier.modules.scipy import ScipyRelationshipsModule
 from fldataprofier.modules.shap import ShapRelationshipsModule
+from fldataprofier.modules.signal_analysis import SignalAnalysisModule
 from fldataprofier.modules.sklearn import SklearnRelationshipsModule
 from fldataprofier.modules.stability_selection import StabilitySelectionModule
 from fldataprofier.modules.statsmodels import StatsmodelsRelationshipsModule
@@ -42,12 +43,14 @@ _MODULES: dict[str, ProfilingModule] = {
     "regularized_linear": RegularizedLinearModule(),
     "scipy": ScipyRelationshipsModule(),
     "shap": ShapRelationshipsModule(),
+    "signal_analysis": SignalAnalysisModule(),
     "sklearn": SklearnRelationshipsModule(),
     "stability_selection": StabilitySelectionModule(),
     "statistics": StatisticsModule(),
     "statsmodels": StatsmodelsRelationshipsModule(),
     "timeseries_importance": TimeSeriesImportanceModule(),
     "xgboost": XGBoostRelationshipsModule(),
+    "xgboost-numeric": XGBoostRelationshipsModule(),
 }
 
 

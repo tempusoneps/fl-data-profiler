@@ -70,8 +70,8 @@ fldataprofiler fit datasets/feature.parquet datasets/label.csv --module scipy
 # Đánh giá tầm quan trọng feature bằng Machine Learning (Ridge / SGD)
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module sklearn
 
-# Gradient Boosting với XGBoost
-fldataprofiler fit datasets/feature.parquet datasets/label.csv --module xgboost
+# Gradient Boosting với XGBoost (chỉ sử dụng numeric features)
+fldataprofiler fit datasets/feature.parquet datasets/label.csv --module xgboost-numeric
 
 # Giải thích giá trị tác động của từng feature bằng SHAP Value
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module shap
