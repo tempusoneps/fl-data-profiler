@@ -16,6 +16,7 @@ from fldataprofier.utils import (
     _html_markdown_details,
     _markdown_table,
     _merge_inputs,
+    _numeric_feature_columns,
     _numeric_series,
     _read_table_with_date_index,
     _round,
@@ -244,25 +245,34 @@ def _merge_contiguous_regions(grid_cells: pd.DataFrame, raw_features: pd.DataFra
 
 def _extract_2d_rules(merged_df: pd.DataFrame, feature_columns: list[str], label_columns: list[str], n_bins: int=8, min_samples: int=15, min_purity: float=0.70) -> pd.DataFrame:
     rules = []
-    if len(feature_columns) < 2 or not label_columns:
+    numeric_features = _numeric_feature_columns(merged_df, feature_columns)
+    if len(numeric_features) < 2 or not label_columns:
         return pd.DataFrame(columns=["rule_text"])
     label_col = label_columns[0]
     
-    bin_frame = _quantile_bin_features(merged_df[feature_columns], n_bins=n_bins)
+    bin_frame = _quantile_bin_features(merged_df[numeric_features], n_bins=n_bins)
     candidate_scores = _score_1d_candidates(bin_frame, merged_df[label_columns])
-    candidates = _select_candidate_features(candidate_scores, feature_columns)
+    candidates = _select_candidate_features(candidate_scores, numeric_features)
     if len(candidates) < 2:
-        candidates = feature_columns[:2]
+        candidates = numeric_features[:2]
         
     for fx, fy in combinations(candidates, 2):
         df_pair = merged_df[[fx, fy, label_col]].dropna()
         if df_pair.empty:
             continue
         try:
-            bin_x = pd.qcut(df_pair[fx], q=n_bins, labels=False, duplicates="drop")
-            bin_y = pd.qcut(df_pair[fy], q=n_bins, labels=False, duplicates="drop")
-        except ValueError:
+            s_x = _numeric_series(df_pair[fx])
+            s_y = _numeric_series(df_pair[fy])
+            valid_mask = s_x.notna() & s_y.notna()
+            if valid_mask.sum() < min_samples:
+                continue
+            bin_x = pd.qcut(s_x[valid_mask], q=n_bins, labels=False, duplicates="drop")
+            bin_y = pd.qcut(s_y[valid_mask], q=n_bins, labels=False, duplicates="drop")
+        except (ValueError, TypeError):
             continue
+        df_pair = df_pair.loc[valid_mask].copy()
+        df_pair[fx] = s_x[valid_mask]
+        df_pair[fy] = s_y[valid_mask]
         df_pair["x_bin"] = bin_x
         df_pair["y_bin"] = bin_y
         
@@ -351,6 +361,7 @@ class VisualRegionsModule:
         self.progress.step("prepare")
         merged, feature_cols, label_cols, _ = _merge_inputs(features, labels, join_key=join_key)
         label_cols = _select_targets(label_cols, targets)
+        feature_cols = _numeric_feature_columns(merged, feature_cols)
         
         self.progress.step("extract_rules")
         rules_df = _extract_2d_rules(merged, feature_cols, label_cols, n_bins=self.n_bins, min_samples=self.min_samples_per_region, min_purity=self.min_purity)
