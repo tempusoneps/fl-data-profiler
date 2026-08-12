@@ -24,6 +24,7 @@ from fldataprofier.modules.statsmodels import StatsmodelsRelationshipsModule
 from fldataprofier.modules.statistics import StatisticsModule
 from fldataprofier.modules.timeseries_importance import TimeSeriesImportanceModule
 from fldataprofier.modules.xgboost import XGBoostRelationshipsModule
+from fldataprofier.modules.visual_regions import VisualRegionsModule
 
 
 _MODULES: dict[str, ProfilingModule] = {
@@ -49,6 +50,7 @@ _MODULES: dict[str, ProfilingModule] = {
     "statistics": StatisticsModule(),
     "statsmodels": StatsmodelsRelationshipsModule(),
     "timeseries_importance": TimeSeriesImportanceModule(),
+    "visual_regions": VisualRegionsModule(),
     "xgboost": XGBoostRelationshipsModule(),
     "xgboost-numeric": XGBoostRelationshipsModule(),
 }

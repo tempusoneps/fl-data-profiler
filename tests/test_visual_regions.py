@@ -178,3 +178,11 @@ class VisualRegionsModuleTests(unittest.TestCase):
             self.assertIn("rules_2d.csv", artifact_names)
             self.assertIn("report.md", artifact_names)
             self.assertIn("report.html", artifact_names)
+
+    def test_registry_integration(self) -> None:
+        from fldataprofier.registry import list_modules, get_module
+        from fldataprofier.modules.visual_regions import VisualRegionsModule
+        
+        self.assertIn("visual_regions", list_modules())
+        module = get_module("visual_regions")
+        self.assertIsInstance(module, VisualRegionsModule)
