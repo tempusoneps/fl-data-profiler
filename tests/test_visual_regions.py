@@ -140,3 +140,41 @@ class VisualRegionsHelperTests(unittest.TestCase):
         
         rules = _extract_2d_rules(df, ["f1", "f2"], ["label"], n_bins=3, min_samples=2, min_purity=0.5)
         self.assertTrue("rule_text" in rules.columns)
+
+
+class VisualRegionsModuleTests(unittest.TestCase):
+    def test_run_creates_expected_artifacts(self) -> None:
+        from fldataprofier.modules.visual_regions import VisualRegionsModule
+
+        feature_df = pd.DataFrame(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "f1": [0.1, 0.2, 0.8, 0.9, 1.0],
+                "f2": [10, 20, 80, 90, 100],
+            }
+        )
+        label_df = pd.DataFrame(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "label": ["A", "A", "B", "B", "B"],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            feature_csv = temp_path / "features.csv"
+            label_csv = temp_path / "labels.csv"
+            feature_df.to_csv(feature_csv, index=False)
+            label_df.to_csv(label_csv, index=False)
+
+            module = VisualRegionsModule(n_bins=3, min_samples_per_region=2, min_purity=0.5)
+            result = module.run(feature_csv, label_csv, temp_path, join_key="id")
+
+            self.assertEqual("visual_regions", result.report_dir.name)
+            self.assertEqual(4, len(result.artifacts))
+            
+            artifact_names = [a.name for a in result.artifacts]
+            self.assertIn("summary.json", artifact_names)
+            self.assertIn("rules_2d.csv", artifact_names)
+            self.assertIn("report.md", artifact_names)
+            self.assertIn("report.html", artifact_names)
