@@ -299,3 +299,96 @@ def _extract_2d_rules(merged_df: pd.DataFrame, feature_columns: list[str], label
     res = res.sort_values("rule_score", ascending=False).reset_index(drop=True)
     res["rank"] = res.index + 1
     return res
+
+def _render_rules_markdown(metadata: VisualRegionsRunMetadata, rules_df: pd.DataFrame, candidate_scores: pd.DataFrame) -> str:
+    lines = [
+        f"# Visual Regions (2D Rules)",
+        "",
+        f"**Module:** `{metadata.module}`",
+        f"**Generated:** `{metadata.created_at}`",
+        f"**Feature Set:** `{metadata.feature_shape.rows} rows, {metadata.feature_shape.columns} cols`",
+        f"**Label Set:** `{metadata.label_shape.rows} rows, {metadata.label_shape.columns} cols`",
+        f"**Merged Set:** `{metadata.merged_shape.rows} rows, {metadata.merged_shape.columns} cols`",
+        ""
+    ]
+    
+    if rules_df.empty:
+        lines.append("No 2D rules extracted.")
+    else:
+        lines.append("## Top Rules")
+        lines.append("")
+        for _, rule in rules_df.head(10).iterrows():
+            lines.append(f"- **Rank {rule['rank']}**: {rule['rule_text']} (Purity: {rule['purity_pct']:.2%}, Samples: {rule['sample_count']})")
+        lines.append("")
+        lines.append("## Rule Details")
+        lines.append("")
+        lines.append(_markdown_table(rules_df))
+    return "\n".join(lines)
+
+def _render_rules_html(markdown: str, rules_df: pd.DataFrame, candidate_scores: pd.DataFrame) -> str:
+    return _html_markdown_details(markdown)
+
+
+class VisualRegionsModule:
+    name = "visual_regions"
+
+    def __init__(self, n_bins: int=8, min_samples_per_region: int=15, min_purity: float=0.70, progress=None):
+        self.n_bins = n_bins
+        self.min_samples_per_region = min_samples_per_region
+        self.min_purity = min_purity
+        self.progress = progress or ModuleProgress(module_name=self.name, total=5)
+
+    def run(self, feature_csv: str | Path, label_csv: str | Path, output_dir: str | Path, join_key: str | None = None, targets: list[str] | None = None) -> ModuleResult:
+        feature_path = Path(feature_csv)
+        label_path = Path(label_csv)
+        out_path = Path(output_dir) / self.name
+        out_path.mkdir(parents=True, exist_ok=True)
+        
+        self.progress.step("load")
+        features = _read_table_with_date_index(feature_path)
+        labels = _read_table_with_date_index(label_path)
+        
+        self.progress.step("prepare")
+        merged, feature_cols, label_cols, _ = _merge_inputs(features, labels, join_key=join_key)
+        label_cols = _select_targets(label_cols, targets)
+        
+        self.progress.step("extract_rules")
+        rules_df = _extract_2d_rules(merged, feature_cols, label_cols, n_bins=self.n_bins, min_samples=self.min_samples_per_region, min_purity=self.min_purity)
+        
+        self.progress.step("artifacts")
+        metadata = VisualRegionsRunMetadata(
+            module=self.name,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            feature_csv=feature_path.name,
+            label_csv=label_path.name,
+            join_strategy="inner",
+            feature_shape=DatasetShape(rows=len(features), columns=len(features.columns)),
+            label_shape=DatasetShape(rows=len(labels), columns=len(labels.columns)),
+            merged_shape=DatasetShape(rows=len(merged), columns=len(merged.columns)),
+            model_rows=len(merged),
+            numeric_features=feature_cols,
+            categorical_labels=label_cols,
+            candidate_features=[],
+            feature_pairs=0,
+            thresholds={"n_bins": self.n_bins, "min_purity": self.min_purity}
+        )
+        
+        _write_json(out_path / "summary.json", asdict(metadata))
+        _write_csv(out_path / "rules_2d.csv", rules_df)
+        
+        self.progress.step("report")
+        candidate_scores = pd.DataFrame()
+        md_content = _render_rules_markdown(metadata, rules_df, candidate_scores)
+        (out_path / "report.md").write_text(md_content, encoding="utf-8")
+        html_content = _render_rules_html(md_content, rules_df, candidate_scores)
+        (out_path / "report.html").write_text(html_content, encoding="utf-8")
+        
+        return ModuleResult(
+            report_dir=out_path,
+            artifacts=[
+                out_path / "summary.json",
+                out_path / "rules_2d.csv",
+                out_path / "report.md",
+                out_path / "report.html"
+            ]
+        )
