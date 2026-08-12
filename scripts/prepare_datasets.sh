@@ -3,6 +3,10 @@
 # Exit on error, pipe failures, and unset variables
 set -euo pipefail
 
+uv lock --upgrade-package autofcholv
+uv lock --upgrade-package labelohlcv
+uv sync
+
 # Determine script & project directories to ensure relative path works from any working directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
