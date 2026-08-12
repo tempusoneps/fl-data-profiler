@@ -185,3 +185,117 @@ def _select_candidate_features(
         sampled = list(rng.choice(np.array(remaining, dtype=object), size=sample_size, replace=False))
         selected.extend(str(feature) for feature in sampled)
     return selected[:max_features]
+
+def _evaluate_2d_grid_purity(df: pd.DataFrame, x_bin_col: str, y_bin_col: str, x_val_col: str, y_val_col: str, label_col: str) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    global_counts = df[label_col].value_counts(normalize=True)
+    cells = []
+    for (x_bin, y_bin), group in df.groupby([x_bin_col, y_bin_col]):
+        sample_count = len(group)
+        label_counts = group[label_col].value_counts()
+        majority_label = label_counts.idxmax()
+        purity = label_counts.max() / sample_count
+        global_prior = global_counts.get(majority_label, 1e-5)
+        lift = purity / global_prior
+        cells.append({
+            "x_bin": x_bin,
+            "y_bin": y_bin,
+            "sample_count": sample_count,
+            "majority_label": majority_label,
+            "purity": purity,
+            "lift": lift,
+            "x_min": group[x_val_col].min(),
+            "x_max": group[x_val_col].max(),
+            "y_min": group[y_val_col].min(),
+            "y_max": group[y_val_col].max(),
+        })
+    return pd.DataFrame(cells)
+
+def _merge_contiguous_regions(grid_cells: pd.DataFrame, raw_features: pd.DataFrame, feature_x: str, feature_y: str, label_col: str, min_purity: float, min_samples: int) -> pd.DataFrame:
+    if grid_cells is None or grid_cells.empty:
+        return pd.DataFrame()
+    filtered = grid_cells[(grid_cells["purity"] >= min_purity) & (grid_cells["sample_count"] >= min_samples)].copy()
+    if filtered.empty:
+        return pd.DataFrame()
+    
+    merged = []
+    for label, group in filtered.groupby("majority_label"):
+        x_min = group["x_min"].min()
+        x_max = group["x_max"].max()
+        y_min = group["y_min"].min()
+        y_max = group["y_max"].max()
+        
+        total_samples = group["sample_count"].sum()
+        avg_purity = (group["purity"] * group["sample_count"]).sum() / total_samples
+        avg_lift = (group["lift"] * group["sample_count"]).sum() / total_samples
+        
+        merged.append({
+            "majority_label": label,
+            "purity": avg_purity,
+            "sample_count": total_samples,
+            "lift": avg_lift,
+            "x_min": x_min,
+            "x_max": x_max,
+            "y_min": y_min,
+            "y_max": y_max,
+        })
+    return pd.DataFrame(merged)
+
+def _extract_2d_rules(merged_df: pd.DataFrame, feature_columns: list[str], label_columns: list[str], n_bins: int=8, min_samples: int=15, min_purity: float=0.70) -> pd.DataFrame:
+    rules = []
+    if len(feature_columns) < 2 or not label_columns:
+        return pd.DataFrame(columns=["rule_text"])
+    label_col = label_columns[0]
+    
+    bin_frame = _quantile_bin_features(merged_df[feature_columns], n_bins=n_bins)
+    candidate_scores = _score_1d_candidates(bin_frame, merged_df[label_columns])
+    candidates = _select_candidate_features(candidate_scores, feature_columns)
+    if len(candidates) < 2:
+        candidates = feature_columns[:2]
+        
+    for fx, fy in combinations(candidates, 2):
+        df_pair = merged_df[[fx, fy, label_col]].dropna()
+        if df_pair.empty:
+            continue
+        try:
+            bin_x = pd.qcut(df_pair[fx], q=n_bins, labels=False, duplicates="drop")
+            bin_y = pd.qcut(df_pair[fy], q=n_bins, labels=False, duplicates="drop")
+        except ValueError:
+            continue
+        df_pair["x_bin"] = bin_x
+        df_pair["y_bin"] = bin_y
+        
+        cells = _evaluate_2d_grid_purity(df_pair, "x_bin", "y_bin", fx, fy, label_col)
+        merged_regions = _merge_contiguous_regions(cells, None, fx, fy, label_col, min_purity, min_samples)
+        
+        for _, region in merged_regions.iterrows():
+            sample_count = region["sample_count"]
+            purity = region["purity"]
+            lift = region["lift"]
+            score = purity * np.log2(max(2, sample_count)) * lift
+            rule_text = f"IF {fx} ∈ [{region['x_min']:.2f}, {region['x_max']:.2f}] AND {fy} ∈ [{region['y_min']:.2f}, {region['y_max']:.2f}] THEN Label = {region['majority_label']}"
+            
+            rules.append({
+                "rank": 0,
+                "feature_x": fx,
+                "feature_y": fy,
+                "range_x_min": region["x_min"],
+                "range_x_max": region["x_max"],
+                "range_y_min": region["y_min"],
+                "range_y_max": region["y_max"],
+                "target_label": region["majority_label"],
+                "purity_pct": purity,
+                "sample_count": sample_count,
+                "coverage_pct": sample_count / len(merged_df),
+                "lift_ratio": lift,
+                "rule_score": score,
+                "rule_text": rule_text
+            })
+            
+    res = pd.DataFrame(rules)
+    if res.empty:
+        return pd.DataFrame(columns=["rule_text"])
+    res = res.sort_values("rule_score", ascending=False).reset_index(drop=True)
+    res["rank"] = res.index + 1
+    return res
