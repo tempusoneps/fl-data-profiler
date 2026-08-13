@@ -6,9 +6,9 @@ from pathlib import Path
 import pandas as pd
 
 from fldataprofier.registry import get_module, list_modules
-from fldataprofier.modules.flaml_module import FLAMLRelationshipsModule
-from fldataprofier.modules.autogluon_module import AutoGluonRelationshipsModule
-from fldataprofier.modules.pycaret_module import PyCaretRelationshipsModule
+from fldataprofier.modules.automl_flaml import FLAMLRelationshipsModule
+from fldataprofier.modules.automl_autogluon import AutoGluonRelationshipsModule
+from fldataprofier.modules.automl_pycaret import PyCaretRelationshipsModule
 
 
 class AutoMLTests(unittest.TestCase):
