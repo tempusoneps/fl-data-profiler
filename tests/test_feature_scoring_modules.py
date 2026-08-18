@@ -40,7 +40,9 @@ def make_signal_dataset(base_dir: Path, rows: int = 260) -> tuple[Path, Path]:
 
 class FeatureScoringModuleTests(unittest.TestCase):
     def test_information_coefficient_ranks_signal_feature(self) -> None:
-        from fldataprofier.modules.information_coefficient import InformationCoefficientModule
+        from fldataprofier.modules.information_coefficient import (
+            InformationCoefficientModule,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -54,7 +56,9 @@ class FeatureScoringModuleTests(unittest.TestCase):
         self.assertIn(top["score_name"], {"pearson_ic", "rank_ic"})
 
     def test_permutation_importance_ts_ranks_predictive_feature(self) -> None:
-        from fldataprofier.modules.permutation_importance_ts import PermutationImportanceTSModule
+        from fldataprofier.modules.permutation_importance_ts import (
+            PermutationImportanceTSModule,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -71,7 +75,9 @@ class FeatureScoringModuleTests(unittest.TestCase):
         self.assertGreater(float(scores.iloc[0]["mean_score"]), 0)
 
     def test_timeseries_importance_combines_component_scores(self) -> None:
-        from fldataprofier.modules.timeseries_importance import TimeSeriesImportanceModule
+        from fldataprofier.modules.timeseries_importance import (
+            TimeSeriesImportanceModule,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -86,10 +92,14 @@ class FeatureScoringModuleTests(unittest.TestCase):
             components = pd.read_csv(result.report_dir / "component_scores.csv")
 
         self.assertEqual("signal", scores.iloc[0]["feature"])
-        self.assertTrue({"rank_ic", "permutation_importance"}.issubset(set(components["score_name"])))
+        self.assertTrue(
+            {"rank_ic", "permutation_importance"}.issubset(set(components["score_name"]))
+        )
 
     def test_timeseries_importance_uses_tqdm_when_progress_enabled(self) -> None:
-        from fldataprofier.modules.timeseries_importance import TimeSeriesImportanceModule
+        from fldataprofier.modules.timeseries_importance import (
+            TimeSeriesImportanceModule,
+        )
 
         class FakeProgress:
             def __init__(self, *args, **kwargs) -> None:
@@ -152,14 +162,38 @@ class FeatureScoringModuleTests(unittest.TestCase):
 
         module_cases = [
             ("fldataprofier.modules.information_coefficient", "InformationCoefficientModule", {}),
-            ("fldataprofier.modules.permutation_importance_ts", "PermutationImportanceTSModule", {"n_estimators": 5, "random_state": 7}),
-            ("fldataprofier.modules.timeseries_importance", "TimeSeriesImportanceModule", {"n_estimators": 5, "random_state": 11}),
+            (
+                "fldataprofier.modules.permutation_importance_ts",
+                "PermutationImportanceTSModule",
+                {"n_estimators": 5, "random_state": 7},
+            ),
+            (
+                "fldataprofier.modules.timeseries_importance",
+                "TimeSeriesImportanceModule",
+                {"n_estimators": 5, "random_state": 11},
+            ),
             ("fldataprofier.modules.mutual_information", "MutualInformationModule", {}),
             ("fldataprofier.modules.mrmr", "MRMRModule", {"max_features": 10, "random_state": 3}),
-            ("fldataprofier.modules.stability_selection", "StabilitySelectionModule", {"n_resamples": 3, "random_state": 13}),
-            ("fldataprofier.modules.regularized_linear", "RegularizedLinearModule", {"random_state": 17}),
-            ("fldataprofier.modules.lightgbm", "LightGBMModule", {"n_estimators": 5, "random_state": 19}),
-            ("fldataprofier.modules.feature_interactions", "FeatureInteractionsModule", {"max_base_features": 4, "max_pairs": 6}),
+            (
+                "fldataprofier.modules.stability_selection",
+                "StabilitySelectionModule",
+                {"n_resamples": 3, "random_state": 13},
+            ),
+            (
+                "fldataprofier.modules.regularized_linear",
+                "RegularizedLinearModule",
+                {"random_state": 17},
+            ),
+            (
+                "fldataprofier.modules.lightgbm",
+                "LightGBMModule",
+                {"n_estimators": 5, "random_state": 19},
+            ),
+            (
+                "fldataprofier.modules.feature_interactions",
+                "FeatureInteractionsModule",
+                {"max_base_features": 4, "max_pairs": 6},
+            ),
             ("fldataprofier.modules.regime_scoring", "RegimeScoringModule", {"n_regimes": 3}),
         ]
 

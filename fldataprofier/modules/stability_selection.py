@@ -82,10 +82,13 @@ def _stability_scores(prepared, n_resamples: int, random_state: int) -> pd.DataF
             y = LabelEncoder().fit_transform(y_raw[mask].astype(str))
             if len(np.unique(y)) < 2:
                 continue
-            model_factory = lambda: make_pipeline(
-                StandardScaler(),
-                LogisticRegression(penalty="l1", solver="liblinear", C=0.2, max_iter=1000),
-            )
+
+            def model_factory():
+                return make_pipeline(
+                    StandardScaler(),
+                    LogisticRegression(penalty="l1", solver="liblinear", C=0.2, max_iter=1000),
+                )
+
         else:
             y_series = _numeric_series(y_raw[mask])
             valid = y_series.notna()
@@ -93,7 +96,13 @@ def _stability_scores(prepared, n_resamples: int, random_state: int) -> pd.DataF
                 continue
             x = x.loc[y_series[valid].index]
             y = y_series[valid].to_numpy()
-            model_factory = lambda: make_pipeline(StandardScaler(), Lasso(alpha=0.01, max_iter=5000))
+
+            def model_factory():
+                return make_pipeline(
+                    StandardScaler(),
+                    Lasso(alpha=0.01, max_iter=5000),
+                )
+
         counts = dict.fromkeys(features, 0)
         valid_resamples = 0
         sample_size = max(20, int(len(x) * 0.7))
@@ -119,8 +128,12 @@ def _stability_scores(prepared, n_resamples: int, random_state: int) -> pd.DataF
                     "score_name": "selection_frequency",
                     "score": frequency,
                     "selection_frequency": frequency,
-                    "samples": int(len(x)),
+                    "samples": len(x),
                     "valid_resamples": valid_resamples,
                 }
             )
-    return pd.DataFrame(rows).sort_values("selection_frequency", ascending=False).reset_index(drop=True)
+    return (
+        pd.DataFrame(rows)
+        .sort_values("selection_frequency", ascending=False)
+        .reset_index(drop=True)
+    )

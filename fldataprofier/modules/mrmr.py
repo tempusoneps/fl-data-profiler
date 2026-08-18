@@ -101,7 +101,11 @@ def _mrmr_scores(prepared, max_features: int, random_state: int) -> pd.DataFrame
                 break
             selected.append(str(best["feature"]))
             rows.append(best)
-    return pd.DataFrame(rows).sort_values(["mrmr_score", "relevance"], ascending=[False, False]).reset_index(drop=True)
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["mrmr_score", "relevance"], ascending=[False, False])
+        .reset_index(drop=True)
+    )
 
 
 def _mean_abs_corr(frame: pd.DataFrame, feature: str, selected: list[str]) -> float:

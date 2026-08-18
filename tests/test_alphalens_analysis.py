@@ -13,19 +13,19 @@ from fldataprofier.registry import get_module
 
 def make_alphalens_synthetic_dataset(base_dir: Path, rows: int = 300) -> tuple[Path, Path]:
     dates = pd.date_range("2024-01-01", periods=rows, freq="5min")
-    
+
     # Generate price random walk
     np.random.seed(42)
     returns = np.random.normal(0.0002, 0.005, rows)
     close_price = 1000.0 * np.exp(np.cumsum(returns))
-    
+
     # Generate a predictive signal: positively correlated with forward price change (t to t+5)
     fwd_5 = pd.Series(close_price).pct_change(5).shift(-5).fillna(0).values
     signal = fwd_5 * 10.0 + np.random.normal(0, 0.01, rows)
-    
+
     # Generate an inverted signal: negatively correlated with forward return
     inverted_signal = -fwd_5 * 8.0 + np.random.normal(0, 0.01, rows)
-    
+
     # Pure noise feature
     noise = np.random.normal(0, 1.0, rows)
 

@@ -1,16 +1,13 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import combinations
 from pathlib import Path
 
-import warnings
-
 import numpy as np
 import pandas as pd
-
-warnings.filterwarnings("ignore", category=UserWarning)
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import KMeans
 from sklearn.feature_selection import mutual_info_classif
@@ -32,19 +29,20 @@ from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
-    _html_markdown_details,
-    _read_table_with_date_index,
     _date_columns,
+    _html_markdown_details,
     _markdown_table,
     _merge_inputs,
     _numeric_feature_columns,
     _numeric_series,
+    _read_table_with_date_index,
     _round,
     _select_targets,
     _write_csv,
     _write_json,
 )
 
+warnings.filterwarnings("ignore", category=UserWarning)
 
 MAX_ROWS = 50_000
 MAX_LABEL_CLASSES = 50
@@ -96,7 +94,7 @@ def _map_clusters_to_labels(y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarra
         return y_pred
     cm = contingency_matrix(y_true, y_pred)
     row_ind, col_ind = linear_sum_assignment(-cm)
-    mapping = {col: row for row, col in zip(row_ind, col_ind)}
+    mapping = {col: row for row, col in zip(row_ind, col_ind, strict=False)}
     return np.array([mapping.get(c, c) for c in y_pred])
 
 
@@ -121,7 +119,6 @@ def _clustering_f1_weighted(y_true: np.ndarray, y_pred: np.ndarray) -> float:
         return 0.0
     mapped_pred = _map_clusters_to_labels(y_true, y_pred)
     return float(f1_score(y_true, mapped_pred, average="weighted", zero_division=0))
-
 
 
 @dataclass(frozen=True)
@@ -184,7 +181,9 @@ class KMeanRelationshipsModule:
             label_pairs_map[label] = pairs
             total_combinations += len(pairs)
 
-        with ModuleProgress(self.name, total=total_combinations, enabled=self.progress) as progress_bar:
+        with ModuleProgress(
+            self.name, total=total_combinations, enabled=self.progress
+        ) as progress_bar:
             results, cluster_distribution = _fit_kmeans_reports(
                 model_frame,
                 label_pairs_map,
@@ -197,7 +196,7 @@ class KMeanRelationshipsModule:
 
         metadata = KMeanRunMetadata(
             module=self.name,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
             label_csv=str(label_csv),
             join_strategy=join_strategy,
@@ -223,7 +222,9 @@ class KMeanRelationshipsModule:
                     "numeric_features": numeric_features,
                     "categorical_labels": categorical_labels,
                     "top_results": _ranked_successful(results).head(100).to_dict(orient="records"),
-                    "cluster_distribution": cluster_distribution.head(200).to_dict(orient="records"),
+                    "cluster_distribution": cluster_distribution.head(200).to_dict(
+                        orient="records"
+                    ),
                 },
             ),
             _write_csv(run_dir / "numeric_features.csv", numeric_features_frame),
@@ -265,7 +266,8 @@ def _label_profile_frame(merged: pd.DataFrame, labels: list[str]) -> pd.DataFram
                 "non_null": int(values.notna().sum()),
                 "unique": int(values.nunique(dropna=True)),
                 "top_values": "; ".join(
-                    f"{value}={count}" for value, count in values.value_counts(dropna=False).head(10).items()
+                    f"{value}={count}"
+                    for value, count in values.value_counts(dropna=False).head(10).items()
                 ),
             }
         )
@@ -282,7 +284,9 @@ def _fit_kmeans_reports(
     distribution_rows: list[dict[str, object]] = []
 
     for label in label_columns:
-        pairs = label_pairs_map.get(label, []) if isinstance(label_pairs_map, dict) else label_pairs_map
+        pairs = (
+            label_pairs_map.get(label, []) if isinstance(label_pairs_map, dict) else label_pairs_map
+        )
         if not pairs:
             continue
         unique_features = list({feat for pair in pairs for feat in pair})
@@ -290,14 +294,22 @@ def _fit_kmeans_reports(
         corr_matrix = sub_df.corr().abs()
 
         for feature_1, feature_2 in pairs:
-            corr_val = corr_matrix.loc[feature_1, feature_2] if (feature_1 in corr_matrix and feature_2 in corr_matrix) else 0.0
+            corr_val = (
+                corr_matrix.loc[feature_1, feature_2]
+                if (feature_1 in corr_matrix and feature_2 in corr_matrix)
+                else 0.0
+            )
             if not np.isnan(corr_val) and corr_val > MAX_PAIR_CORRELATION:
                 result_rows.append(
-                    _skipped_result(feature_1, feature_2, label, len(merged), "high_feature_correlation")
+                    _skipped_result(
+                        feature_1, feature_2, label, len(merged), "high_feature_correlation"
+                    )
                 )
             else:
                 x = merged[[feature_1, feature_2]].apply(_numeric_series)
-                result, distribution = _fit_single_kmeans(feature_1, feature_2, label, x, merged[label])
+                result, distribution = _fit_single_kmeans(
+                    feature_1, feature_2, label, x, merged[label]
+                )
                 result_rows.append(result)
                 distribution_rows.extend(distribution)
 
@@ -321,16 +333,22 @@ def _fit_single_kmeans(
     label_values = frame[label].astype(str)
     class_count = int(label_values.nunique(dropna=True))
     if class_count < 2:
-        return _skipped_result(feature_1, feature_2, label, len(frame), "label_has_less_than_2_classes"), []
+        return _skipped_result(
+            feature_1, feature_2, label, len(frame), "label_has_less_than_2_classes"
+        ), []
     if class_count > MAX_LABEL_CLASSES:
-        return _skipped_result(feature_1, feature_2, label, len(frame), "label_has_too_many_classes"), []
+        return _skipped_result(
+            feature_1, feature_2, label, len(frame), "label_has_too_many_classes"
+        ), []
     test_count = int(np.ceil(len(frame) * TEST_SIZE))
     train_count = len(frame) - test_count
     if train_count < class_count:
-        return _skipped_result(feature_1, feature_2, label, len(frame), "not_enough_train_samples_for_clusters"), []
+        return _skipped_result(
+            feature_1, feature_2, label, len(frame), "not_enough_train_samples_for_clusters"
+        ), []
 
     encoder = LabelEncoder()
-    encoded = encoder.fit_transform(label_values)
+    encoder.fit(label_values)
     train_frame, test_frame = train_test_split(
         frame,
         test_size=TEST_SIZE,
@@ -370,21 +388,35 @@ def _fit_single_kmeans(
             "feature_2": feature_2,
             "label": label,
             "status": "ok",
-            "samples": int(len(frame)),
-            "train_samples": int(len(train_frame)),
-            "test_samples": int(len(test_frame)),
+            "samples": len(frame),
+            "train_samples": len(train_frame),
+            "test_samples": len(test_frame),
             "label_classes": int(class_count),
             "clusters": int(class_count),
-            "train_accuracy": _round(float(_clustering_accuracy(train_labels, train_clusters) * 100)),
+            "train_accuracy": _round(
+                float(_clustering_accuracy(train_labels, train_clusters) * 100)
+            ),
             "test_accuracy": _round(float(_clustering_accuracy(test_labels, test_clusters) * 100)),
-            "train_balanced_accuracy": _round(float(_clustering_balanced_accuracy(train_labels, train_clusters) * 100)),
-            "test_balanced_accuracy": _round(float(_clustering_balanced_accuracy(test_labels, test_clusters) * 100)),
-            "train_f1_weighted": _round(float(_clustering_f1_weighted(train_labels, train_clusters) * 100)),
-            "test_f1_weighted": _round(float(_clustering_f1_weighted(test_labels, test_clusters) * 100)),
+            "train_balanced_accuracy": _round(
+                float(_clustering_balanced_accuracy(train_labels, train_clusters) * 100)
+            ),
+            "test_balanced_accuracy": _round(
+                float(_clustering_balanced_accuracy(test_labels, test_clusters) * 100)
+            ),
+            "train_f1_weighted": _round(
+                float(_clustering_f1_weighted(train_labels, train_clusters) * 100)
+            ),
+            "test_f1_weighted": _round(
+                float(_clustering_f1_weighted(test_labels, test_clusters) * 100)
+            ),
             "train_adjusted_rand": _round(float(adjusted_rand_score(train_labels, train_clusters))),
             "test_adjusted_rand": _round(float(adjusted_rand_score(test_labels, test_clusters))),
-            "train_normalized_mutual_info": _round(float(normalized_mutual_info_score(train_labels, train_clusters))),
-            "test_normalized_mutual_info": _round(float(normalized_mutual_info_score(test_labels, test_clusters))),
+            "train_normalized_mutual_info": _round(
+                float(normalized_mutual_info_score(train_labels, train_clusters))
+            ),
+            "test_normalized_mutual_info": _round(
+                float(normalized_mutual_info_score(test_labels, test_clusters))
+            ),
             "test_homogeneity": _round(float(homogeneity_score(test_labels, test_clusters))),
             "test_completeness": _round(float(completeness_score(test_labels, test_clusters))),
             "test_v_measure": _round(float(v_measure_score(test_labels, test_clusters))),
@@ -485,7 +517,9 @@ def _cluster_distribution(
                 "cluster": int(cluster),
                 "label_value": str(label_value),
                 "count": int(count),
-                "cluster_pct": _round(float(count / cluster_total * 100)) if cluster_total else None,
+                "cluster_pct": _round(float(count / cluster_total * 100))
+                if cluster_total
+                else None,
             }
         )
     return rows
@@ -542,11 +576,16 @@ def _ranked_successful(results: pd.DataFrame) -> pd.DataFrame:
     if successful.empty:
         return successful
     return successful.sort_values(
-        ["test_balanced_accuracy", "test_f1_weighted", "test_accuracy", "test_adjusted_rand", "samples"],
+        [
+            "test_balanced_accuracy",
+            "test_f1_weighted",
+            "test_accuracy",
+            "test_adjusted_rand",
+            "samples",
+        ],
         ascending=[False, False, False, False, False],
         na_position="last",
     ).reset_index(drop=True)
-
 
 
 def _render_markdown(
@@ -562,7 +601,9 @@ def _render_markdown(
     )
     skipped = results[results["status"] == "skipped"] if not results.empty else results
     skipped_summary = (
-        _markdown_table(skipped["note"].value_counts().rename_axis("reason").reset_index(name="count"))
+        _markdown_table(
+            skipped["note"].value_counts().rename_axis("reason").reset_index(name="count")
+        )
         if not skipped.empty
         else "No skipped combinations."
     )

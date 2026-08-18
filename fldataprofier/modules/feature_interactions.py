@@ -45,7 +45,9 @@ class FeatureInteractionsModule:
             progress_bar.step("load")
             generated = _generate_interactions(prepared, self.max_base_features, self.max_pairs)
             progress_bar.step("generate")
-            interaction_frame = pd.concat([prepared.merged, generated.drop(columns=["__meta__"], errors="ignore")], axis=1)
+            interaction_frame = pd.concat(
+                [prepared.merged, generated.drop(columns=["__meta__"], errors="ignore")], axis=1
+            )
             interaction_columns = [column for column in generated.columns if column != "__meta__"]
             scores = mutual_information_scores(
                 interaction_frame,
@@ -76,7 +78,9 @@ class FeatureInteractionsModule:
 
 
 def _generate_interactions(prepared, max_base_features: int, max_pairs: int) -> pd.DataFrame:
-    base_scores = mutual_information_scores(prepared.merged, prepared.feature_columns, prepared.target_columns)
+    base_scores = mutual_information_scores(
+        prepared.merged, prepared.feature_columns, prepared.target_columns
+    )
     if base_scores.empty:
         return pd.DataFrame()
     base_features = list(dict.fromkeys(base_scores["feature"].head(max_base_features).tolist()))
@@ -91,7 +95,8 @@ def _generate_interactions(prepared, max_base_features: int, max_pairs: int) -> 
         operations = {
             "product": feature_frame[left] * feature_frame[right],
             "difference": feature_frame[left] - feature_frame[right],
-            "ratio": feature_frame[left] / feature_frame[right].where(feature_frame[right].abs() > 1e-12),
+            "ratio": feature_frame[left]
+            / feature_frame[right].where(feature_frame[right].abs() > 1e-12),
         }
         for operation, values in operations.items():
             name = f"{left}__{operation}__{right}"

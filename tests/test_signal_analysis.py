@@ -25,7 +25,9 @@ class SignalAnalysisTests(unittest.TestCase):
             labels = pd.DataFrame(
                 {
                     "allow_entry": [
-                        "Yes - Buy" if i % 3 == 0 else ("Yes - Sell" if i % 4 == 0 else "No - Sideway")
+                        "Yes - Buy"
+                        if i % 3 == 0
+                        else ("Yes - Sell" if i % 4 == 0 else "No - Sideway")
                         for i in range(rows)
                     ]
                 }
@@ -42,6 +44,7 @@ class SignalAnalysisTests(unittest.TestCase):
                 tmp_path / "out",
             )
 
+            self.assertTrue(result.report_dir.exists())
             report_dir = tmp_path / "out" / "signal_analysis"
             self.assertTrue((report_dir / "report.md").exists())
             self.assertTrue((report_dir / "single_signal_scores.csv").exists())

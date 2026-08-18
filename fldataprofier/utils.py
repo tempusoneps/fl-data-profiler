@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import html
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
 
 SUPPORTED_INPUT_SUFFIXES = (".csv", ".parquet")
 _INPUT_ROW_LIMIT: ContextVar[int | None] = ContextVar("fldataprofier_input_row_limit", default=None)
@@ -22,7 +21,6 @@ def _input_row_limit(limit: int | None) -> Iterator[None]:
         yield
     finally:
         _INPUT_ROW_LIMIT.reset(token)
-
 
 
 MODEL_RESULT_COLUMNS = [
@@ -60,7 +58,9 @@ def _read_table(path: Path) -> pd.DataFrame:
         if limit is not None:
             frame = frame.head(limit)
     else:
-        raise ValueError(f"Unsupported input file type for {path}. Expected {_supported_input_formats_message()}.")
+        raise ValueError(
+            f"Unsupported input file type for {path}. Expected {_supported_input_formats_message()}."
+        )
 
     if "Date" in frame.columns:
         frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
@@ -85,7 +85,9 @@ def _write_csv(path: Path, frame: pd.DataFrame) -> Path:
 
 
 def _numeric_series(series: pd.Series) -> pd.Series:
-    return pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).astype("float64")
+    return (
+        pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).astype("float64")
+    )
 
 
 def _round(value: float) -> float | None:
@@ -138,13 +140,17 @@ def _merge_inputs(
             merged = left.merge(right, on=join_key, how="inner", suffixes=("", "__label"))
             feature_columns = [column for column in features.columns if column != join_key]
             label_columns = [
-                _label_output_name(column, features.columns) for column in labels.columns if column != join_key
+                _label_output_name(column, features.columns)
+                for column in labels.columns
+                if column != join_key
             ]
             return merged, feature_columns, label_columns, f"inner join on {join_key}"
         raise ValueError(f"--join-key {join_key!r} must exist in both CSV files")
 
     if features.index.name and features.index.name == labels.index.name:
-        label_frame = labels.rename(columns=lambda column: _label_output_name(column, features.columns))
+        label_frame = labels.rename(
+            columns=lambda column: _label_output_name(column, features.columns)
+        )
         merged = features.join(label_frame, how="inner")
         return (
             merged,
@@ -159,7 +165,9 @@ def _merge_inputs(
         merged = features.merge(labels, on=key, how="inner", suffixes=("", "__label"))
         feature_columns = [column for column in features.columns if column != key]
         label_columns = [
-            _label_output_name(column, features.columns) for column in labels.columns if column != key
+            _label_output_name(column, features.columns)
+            for column in labels.columns
+            if column != key
         ]
         return merged, feature_columns, label_columns, f"inner join on common column {key}"
 
@@ -172,7 +180,9 @@ def _merge_inputs(
     merged = pd.concat(
         [
             features.reset_index(drop=True),
-            labels.reset_index(drop=True).rename(columns=lambda column: _label_output_name(column, features.columns)),
+            labels.reset_index(drop=True).rename(
+                columns=lambda column: _label_output_name(column, features.columns)
+            ),
         ],
         axis=1,
     )
@@ -213,24 +223,32 @@ def _markdown_table(frame: pd.DataFrame) -> str:
     if frame.empty:
         return "No rows."
     columns = [str(column) for column in frame.columns]
-    body = [[_markdown_cell(row[column]) for column in frame.columns] for _, row in frame.iterrows()]
+    body = [
+        [_markdown_cell(row[column]) for column in frame.columns] for _, row in frame.iterrows()
+    ]
     width_rows = [columns, *body]
     widths = [max(len(values[index]) for values in width_rows) for index in range(len(columns))]
 
     def render_row(values: list[str]) -> str:
-        return "| " + " | ".join(value.ljust(widths[index]) for index, value in enumerate(values)) + " |"
+        return (
+            "| "
+            + " | ".join(value.ljust(widths[index]) for index, value in enumerate(values))
+            + " |"
+        )
 
     separator = ["-" * width for width in widths]
-    return "\n".join([render_row(columns), render_row(separator), *[render_row(row) for row in body]])
-
+    return "\n".join(
+        [render_row(columns), render_row(separator), *[render_row(row) for row in body]]
+    )
 
 
 def _html_markdown_details(markdown: str) -> str:
     escaped = html.escape(markdown)
-    return f'''<details class="markdown-source">
+    return f"""<details class="markdown-source">
   <summary>Markdown source</summary>
   <pre>{escaped}</pre>
-</details>'''
+</details>"""
+
 
 def _markdown_cell(value: object) -> str:
     if value is None or (isinstance(value, float) and np.isnan(value)):

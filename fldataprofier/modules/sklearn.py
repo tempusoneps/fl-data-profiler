@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -23,21 +23,20 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
-    _html_markdown_details,
-    _read_table_with_date_index,
     _date_columns,
+    _html_markdown_details,
     _markdown_table,
     _merge_inputs,
     _model_results_frame,
     _numeric_feature_columns,
     _numeric_series,
+    _read_table_with_date_index,
     _round,
     _sample_rows,
     _select_targets,
     _write_csv,
     _write_json,
 )
-
 
 MAX_ROWS = 20_000
 MAX_CLASS_COUNT = 50
@@ -83,7 +82,9 @@ class SklearnRelationshipsModule:
         selected_targets = _select_targets(label_columns, targets)
         numeric_features = _numeric_feature_columns(merged, feature_columns)
 
-        model_frame = _sample_rows(merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE)
+        model_frame = _sample_rows(
+            merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
+        )
         model_results, importances = _fit_target_models(
             model_frame,
             numeric_features,
@@ -95,7 +96,7 @@ class SklearnRelationshipsModule:
 
         metadata = SklearnRunMetadata(
             module=self.name,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
             label_csv=str(label_csv),
             join_strategy=join_strategy,
@@ -147,7 +148,9 @@ def _fit_target_models(
     for label in label_columns:
         y_raw = merged[label]
         y_numeric = _numeric_series(y_raw)
-        is_numeric_target = y_numeric.notna().sum() >= 10 and y_numeric.nunique(dropna=True) > MAX_CLASS_COUNT
+        is_numeric_target = (
+            y_numeric.notna().sum() >= 10 and y_numeric.nunique(dropna=True) > MAX_CLASS_COUNT
+        )
         if is_numeric_target:
             result, importance = _fit_regression(label, x, y_numeric)
         else:
@@ -183,14 +186,16 @@ def _fit_regression(
     predictions = pipeline.predict(x_test)
     rmse = float(np.sqrt(mean_squared_error(y_test, predictions)))
     model = pipeline.named_steps["model"]
-    importance = _coefficient_importance(label, features.columns, model.coef_, "ridge_abs_coefficient")
+    importance = _coefficient_importance(
+        label, features.columns, model.coef_, "ridge_abs_coefficient"
+    )
     return (
         {
             "label": label,
             "task": "regression",
             "model": "Ridge",
-            "samples": int(len(frame)),
-            "features": int(len(features.columns)),
+            "samples": len(frame),
+            "features": len(features.columns),
             "score_primary": _round(float(r2_score(y_test, predictions))),
             "score_primary_name": "r2",
             "mae": _round(float(mean_absolute_error(y_test, predictions))),
@@ -247,14 +252,16 @@ def _fit_classification(
     coefficients = model.coef_
     if coefficients.ndim == 2:
         coefficients = np.mean(np.abs(coefficients), axis=0)
-    importance = _coefficient_importance(label, features.columns, coefficients, "logistic_abs_coefficient")
+    importance = _coefficient_importance(
+        label, features.columns, coefficients, "logistic_abs_coefficient"
+    )
     return (
         {
             "label": label,
             "task": "classification",
             "model": "SGDClassifier(log_loss)",
-            "samples": int(len(frame)),
-            "features": int(len(features.columns)),
+            "samples": len(frame),
+            "features": len(features.columns),
             "score_primary": _round(float(balanced_accuracy_score(y_test, predictions))),
             "score_primary_name": "balanced_accuracy",
             "mae": None,
@@ -290,13 +297,19 @@ def _importance_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     frame = pd.DataFrame(rows, columns=columns)
     if frame.empty:
         return frame
-    return frame.sort_values(["label", "importance"], ascending=[True, False], na_position="last").reset_index(drop=True)
+    return frame.sort_values(
+        ["label", "importance"], ascending=[True, False], na_position="last"
+    ).reset_index(drop=True)
 
 
 def _render_markdown(
     metadata: SklearnRunMetadata, model_results: pd.DataFrame, importances: pd.DataFrame
 ) -> str:
-    scores = _markdown_table(model_results) if not model_results.empty else "No sklearn models were available."
+    scores = (
+        _markdown_table(model_results)
+        if not model_results.empty
+        else "No sklearn models were available."
+    )
     top_importance = (
         _markdown_table(importances.groupby("label", group_keys=False).head(10))
         if not importances.empty
@@ -337,9 +350,13 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, model_results: pd.DataFrame, importances: pd.DataFrame) -> str:
-    scores = model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
+    scores = (
+        model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
+    )
     top_importance = (
-        importances.groupby("label", group_keys=False).head(20).to_html(index=False, classes="data-table")
+        importances.groupby("label", group_keys=False)
+        .head(20)
+        .to_html(index=False, classes="data-table")
         if not importances.empty
         else ""
     )

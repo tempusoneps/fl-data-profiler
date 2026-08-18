@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import combinations
 from pathlib import Path
 
@@ -12,12 +12,12 @@ from scipy import linalg, stats
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
-    _html_markdown_details,
-    _read_table_with_date_index,
     _date_columns,
+    _html_markdown_details,
     _markdown_table,
     _merge_inputs,
     _numeric_series,
+    _read_table_with_date_index,
     _round,
     _select_targets,
     _write_csv,
@@ -70,7 +70,7 @@ class ScipyRelationshipsModule:
 
         metadata = ScipyRunMetadata(
             module=self.name,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
             label_csv=str(label_csv),
             join_strategy=join_strategy,
@@ -158,15 +158,19 @@ def _feature_label_test(feature: pd.Series, label: pd.Series) -> dict[str, objec
         numeric_pair = pd.concat([x_numeric, y_numeric], axis=1).dropna()
         if len(numeric_pair) < 3:
             return None
-        pearson = stats.pearsonr(numeric_pair.iloc[:, 0].to_numpy(), numeric_pair.iloc[:, 1].to_numpy())
-        spearman = stats.spearmanr(numeric_pair.iloc[:, 0].to_numpy(), numeric_pair.iloc[:, 1].to_numpy())
+        pearson = stats.pearsonr(
+            numeric_pair.iloc[:, 0].to_numpy(), numeric_pair.iloc[:, 1].to_numpy()
+        )
+        spearman = stats.spearmanr(
+            numeric_pair.iloc[:, 0].to_numpy(), numeric_pair.iloc[:, 1].to_numpy()
+        )
         return {
             "test": "pearsonr",
             "statistic": _round(float(pearson.statistic)),
             "p_value": _round(float(pearson.pvalue)),
             "effect_size": _round(abs(float(pearson.statistic))),
             "effect_name": "abs_pearson_r",
-            "samples": int(len(numeric_pair)),
+            "samples": len(numeric_pair),
             "feature_type": "numeric",
             "label_type": "numeric",
             "note": f"spearman_r={_round(float(spearman.statistic))}, spearman_p={_round(float(spearman.pvalue))}",
@@ -185,7 +189,7 @@ def _feature_label_test(feature: pd.Series, label: pd.Series) -> dict[str, objec
             "p_value": _round(float(ttest.pvalue)),
             "effect_size": _round(abs(effect)),
             "effect_name": "abs_cohens_d",
-            "samples": int(len(frame)),
+            "samples": len(frame),
             "feature_type": "numeric",
             "label_type": "binary",
             "note": f"mannwhitney_u={_round(float(mannwhitney.statistic))}, mannwhitney_p={_round(float(mannwhitney.pvalue))}",
@@ -204,7 +208,7 @@ def _feature_label_test(feature: pd.Series, label: pd.Series) -> dict[str, objec
             "p_value": _round(float(anova.pvalue)),
             "effect_size": None,
             "effect_name": "not_computed",
-            "samples": int(len(frame)),
+            "samples": len(frame),
             "feature_type": "numeric",
             "label_type": "categorical",
             "note": f"kruskal_h={_round(float(kruskal.statistic))}, kruskal_p={_round(float(kruskal.pvalue))}",
@@ -219,9 +223,11 @@ def _feature_label_test(feature: pd.Series, label: pd.Series) -> dict[str, objec
             "test": "chi2_contingency",
             "statistic": _round(float(chi2.statistic)),
             "p_value": _round(float(chi2.pvalue)),
-            "effect_size": _round(_cramers_v(chi2.statistic, int(table.to_numpy().sum()), table.shape)),
+            "effect_size": _round(
+                _cramers_v(chi2.statistic, int(table.to_numpy().sum()), table.shape)
+            ),
             "effect_name": "cramers_v",
-            "samples": int(len(frame)),
+            "samples": len(frame),
             "feature_type": "categorical",
             "label_type": "categorical",
             "note": f"dof={chi2.dof}",
@@ -290,7 +296,9 @@ def _combined_two_feature_tests(
     )
     if result.empty:
         return result
-    return result.sort_values(["p_value", "r_squared"], ascending=[True, False], na_position="last").reset_index(drop=True)
+    return result.sort_values(
+        ["p_value", "r_squared"], ascending=[True, False], na_position="last"
+    ).reset_index(drop=True)
 
 
 def _two_feature_linear_test(features: pd.DataFrame, label: pd.Series) -> dict[str, object] | None:
@@ -329,7 +337,7 @@ def _two_feature_linear_test(features: pd.DataFrame, label: pd.Series) -> dict[s
 
 
 def _cohens_d(group_a: np.ndarray, group_b: np.ndarray) -> float:
-    pooled = np.sqrt(((group_a.var(ddof=1) + group_b.var(ddof=1)) / 2))
+    pooled = np.sqrt((group_a.var(ddof=1) + group_b.var(ddof=1)) / 2)
     if pooled == 0:
         return 0.0
     return float((group_a.mean() - group_b.mean()) / pooled)
@@ -389,8 +397,12 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, pairwise: pd.DataFrame, combined: pd.DataFrame) -> str:
-    combined_table = combined.to_html(index=False, classes="data-table") if not combined.empty else ""
-    pairwise_table = pairwise.head(50).to_html(index=False, classes="data-table") if not pairwise.empty else ""
+    combined_table = (
+        combined.to_html(index=False, classes="data-table") if not combined.empty else ""
+    )
+    pairwise_table = (
+        pairwise.head(50).to_html(index=False, classes="data-table") if not pairwise.empty else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>

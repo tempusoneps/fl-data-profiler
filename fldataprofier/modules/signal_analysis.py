@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import matplotlib
@@ -13,9 +13,7 @@ import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
-    classification_report,
     f1_score,
-    precision_recall_fscore_support,
 )
 from sklearn.preprocessing import LabelEncoder
 from xgboost import XGBClassifier
@@ -82,7 +80,11 @@ class SignalAnalysisModule:
         if not signal_columns:
             raise ValueError("No columns matching '*signal*' were found in the feature dataset.")
 
-        target_col = TARGET_LABEL if TARGET_LABEL in merged.columns else (targets[0] if targets and targets[0] in merged.columns else label_columns[0])
+        target_col = (
+            TARGET_LABEL
+            if TARGET_LABEL in merged.columns
+            else (targets[0] if targets and targets[0] in merged.columns else label_columns[0])
+        )
 
         model_frame = _sample_rows(merged[[*signal_columns, target_col]], MAX_ROWS, RANDOM_STATE)
 
@@ -120,7 +122,7 @@ class SignalAnalysisModule:
 
         metadata = SignalRunMetadata(
             module=self.name,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
             label_csv=str(label_csv),
             join_strategy=join_strategy,
@@ -132,14 +134,27 @@ class SignalAnalysisModule:
             target_label=target_col,
         )
 
-        insights = _generate_signal_insights(single_signal_df, combined_model_res, combined_importances_df, redundancy_df)
-        markdown = _render_markdown(metadata, insights, single_signal_df, combined_model_res, combined_importances_df, redundancy_df, chart_artifacts)
+        insights = _generate_signal_insights(
+            single_signal_df, combined_model_res, combined_importances_df, redundancy_df
+        )
+        markdown = _render_markdown(
+            metadata,
+            insights,
+            single_signal_df,
+            combined_model_res,
+            combined_importances_df,
+            redundancy_df,
+            chart_artifacts,
+        )
 
         report_md_path = run_dir / "report.md"
         report_md_path.write_text(markdown, encoding="utf-8")
 
         html_path = run_dir / "report.html"
-        html_path.write_text(_render_html(markdown, single_signal_df, combined_model_res, combined_importances_df), encoding="utf-8")
+        html_path.write_text(
+            _render_html(markdown, single_signal_df, combined_model_res, combined_importances_df),
+            encoding="utf-8",
+        )
 
         artifacts = [
             _write_json(
@@ -149,7 +164,9 @@ class SignalAnalysisModule:
                     "insights": insights,
                     "combined_model": combined_model_res,
                     "top_single_signals": single_signal_df.head(50).to_dict(orient="records"),
-                    "combined_importances": combined_importances_df.head(50).to_dict(orient="records"),
+                    "combined_importances": combined_importances_df.head(50).to_dict(
+                        orient="records"
+                    ),
                     "redundant_pairs": redundancy_df.head(30).to_dict(orient="records"),
                 },
             ),
@@ -177,33 +194,43 @@ def _evaluate_single_signals(
         active_count = int(active_mask.sum())
         active_pct = _round((active_count / total_samples) * 100 if total_samples > 0 else 0)
 
-        buy_precision, buy_recall, buy_f1, buy_support = 0.0, 0.0, 0.0, 0
-        sell_precision, sell_recall, sell_f1, sell_support = 0.0, 0.0, 0.0, 0
+        buy_precision, buy_recall, buy_f1 = 0.0, 0.0, 0.0
+        sell_precision, sell_recall, sell_f1 = 0.0, 0.0, 0.0
 
         if active_count >= 5:
             # Check Buy signal alignment (signal > 0 or 1 vs Yes - Buy)
             buy_mask = s > 0
             if buy_mask.sum() > 0:
-                true_buy = (valid_df[target_col] == "Yes - Buy")
+                true_buy = valid_df[target_col] == "Yes - Buy"
                 tp_buy = (buy_mask & true_buy).sum()
                 fp_buy = (buy_mask & ~true_buy).sum()
                 fn_buy = (~buy_mask & true_buy).sum()
-                buy_support = int(true_buy.sum())
                 buy_precision = float(tp_buy / (tp_buy + fp_buy)) if (tp_buy + fp_buy) > 0 else 0.0
                 buy_recall = float(tp_buy / (tp_buy + fn_buy)) if (tp_buy + fn_buy) > 0 else 0.0
-                buy_f1 = (2 * buy_precision * buy_recall / (buy_precision + buy_recall)) if (buy_precision + buy_recall) > 0 else 0.0
+                buy_f1 = (
+                    (2 * buy_precision * buy_recall / (buy_precision + buy_recall))
+                    if (buy_precision + buy_recall) > 0
+                    else 0.0
+                )
 
             # Check Sell signal alignment (signal < 0 or -1 vs Yes - Sell)
             sell_mask = s < 0
             if sell_mask.sum() > 0:
-                true_sell = (valid_df[target_col] == "Yes - Sell")
+                true_sell = valid_df[target_col] == "Yes - Sell"
                 tp_sell = (sell_mask & true_sell).sum()
                 fp_sell = (sell_mask & ~true_sell).sum()
                 fn_sell = (~sell_mask & true_sell).sum()
-                sell_support = int(true_sell.sum())
-                sell_precision = float(tp_sell / (tp_sell + fp_sell)) if (tp_sell + fp_sell) > 0 else 0.0
-                sell_recall = float(tp_sell / (tp_sell + fn_sell)) if (tp_sell + fn_sell) > 0 else 0.0
-                sell_f1 = (2 * sell_precision * sell_recall / (sell_precision + sell_recall)) if (sell_precision + sell_recall) > 0 else 0.0
+                sell_precision = (
+                    float(tp_sell / (tp_sell + fp_sell)) if (tp_sell + fp_sell) > 0 else 0.0
+                )
+                sell_recall = (
+                    float(tp_sell / (tp_sell + fn_sell)) if (tp_sell + fn_sell) > 0 else 0.0
+                )
+                sell_f1 = (
+                    (2 * sell_precision * sell_recall / (sell_precision + sell_recall))
+                    if (sell_precision + sell_recall) > 0
+                    else 0.0
+                )
 
         max_precision = max(buy_precision, sell_precision)
         max_f1 = max(buy_f1, sell_f1)
@@ -271,9 +298,11 @@ def _fit_combined_signal_model(
     imp_values = model.feature_importances_
     imp_rows = [
         {"signal_name": str(col), "importance": _round(float(val))}
-        for col, val in zip(signal_columns, imp_values)
+        for col, val in zip(signal_columns, imp_values, strict=False)
     ]
-    imp_df = pd.DataFrame(imp_rows).sort_values("importance", ascending=False).reset_index(drop=True)
+    imp_df = (
+        pd.DataFrame(imp_rows).sort_values("importance", ascending=False).reset_index(drop=True)
+    )
 
     result_dict = {
         "target": target_col,
@@ -386,7 +415,12 @@ def _generate_signal_insights(
         )
 
     if not imp_df.empty:
-        top_3_imp = ", ".join([f"`{row['signal_name']}` ({row['importance']:.4f})" for _, row in imp_df.head(3).iterrows()])
+        top_3_imp = ", ".join(
+            [
+                f"`{row['signal_name']}` ({row['importance']:.4f})"
+                for _, row in imp_df.head(3).iterrows()
+            ]
+        )
         insights.append(f"🔥 **Top 3 Combined Signals**: {top_3_imp}.")
 
     if not redundancy_df.empty:
@@ -409,10 +443,26 @@ def _render_markdown(
     redundancy_df: pd.DataFrame,
     chart_artifacts: list[Path],
 ) -> str:
-    insights_text = "\n".join([f"- {insight}" for insight in insights]) if insights else "- No specific warnings."
-    single_table = _markdown_table(single_df.head(20)) if not single_df.empty else "No single signals evaluated."
-    imp_table = _markdown_table(imp_df.head(20)) if not imp_df.empty else "No combined importances available."
-    redundancy_table = _markdown_table(redundancy_df.head(15)) if not redundancy_df.empty else "No highly correlated signal pairs found."
+    insights_text = (
+        "\n".join([f"- {insight}" for insight in insights])
+        if insights
+        else "- No specific warnings."
+    )
+    single_table = (
+        _markdown_table(single_df.head(20))
+        if not single_df.empty
+        else "No single signals evaluated."
+    )
+    imp_table = (
+        _markdown_table(imp_df.head(20))
+        if not imp_df.empty
+        else "No combined importances available."
+    )
+    redundancy_table = (
+        _markdown_table(redundancy_df.head(15))
+        if not redundancy_df.empty
+        else "No highly correlated signal pairs found."
+    )
 
     images_text = ""
     if chart_artifacts:
@@ -420,14 +470,18 @@ def _render_markdown(
         images_text = "\n\n## Visual Charts\n\n" + "\n\n".join(images_list)
 
     combined_summary = (
-        f"- Target: `{combined_res.get('target')}`\n"
-        f"- Model: `{combined_res.get('model')}`\n"
-        f"- Test Balanced Accuracy: **{combined_res.get('balanced_accuracy')}**\n"
-        f"- Test Accuracy: **{combined_res.get('accuracy')}**\n"
-        f"- F1 Weighted: **{combined_res.get('f1_weighted')}**\n"
-        f"- Train Score: {combined_res.get('score_train')}\n"
-        f"- Overfit Gap: {combined_res.get('overfit_gap')}"
-    ) if combined_res else "Combined model unavailable."
+        (
+            f"- Target: `{combined_res.get('target')}`\n"
+            f"- Model: `{combined_res.get('model')}`\n"
+            f"- Test Balanced Accuracy: **{combined_res.get('balanced_accuracy')}**\n"
+            f"- Test Accuracy: **{combined_res.get('accuracy')}**\n"
+            f"- F1 Weighted: **{combined_res.get('f1_weighted')}**\n"
+            f"- Train Score: {combined_res.get('score_train')}\n"
+            f"- Overfit Gap: {combined_res.get('overfit_gap')}"
+        )
+        if combined_res
+        else "Combined model unavailable."
+    )
 
     return f"""# Signal Feature Analysis Report (`allow_entry`)
 
@@ -478,8 +532,12 @@ def _render_html(
     combined_res: dict[str, object],
     imp_df: pd.DataFrame,
 ) -> str:
-    single_html = single_df.head(20).to_html(index=False, classes="data-table") if not single_df.empty else ""
-    imp_html = imp_df.head(20).to_html(index=False, classes="data-table") if not imp_df.empty else ""
+    single_html = (
+        single_df.head(20).to_html(index=False, classes="data-table") if not single_df.empty else ""
+    )
+    imp_html = (
+        imp_df.head(20).to_html(index=False, classes="data-table") if not imp_df.empty else ""
+    )
     return f"""<!DOCTYPE html>
 <html>
 <head>

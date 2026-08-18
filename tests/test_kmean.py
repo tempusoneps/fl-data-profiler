@@ -102,6 +102,7 @@ class KMeanTests(unittest.TestCase):
 
     def test_clustering_accuracy_computes_optimal_matching_accuracy(self) -> None:
         import numpy as np
+
         from fldataprofier.modules.kmean import _clustering_accuracy
 
         y_true = np.array([0, 0, 0, 1, 1, 1])

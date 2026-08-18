@@ -87,9 +87,7 @@ def _positive_int(value: str) -> int:
 
 def _validate_input_path(parser: argparse.ArgumentParser, name: str, path: Path) -> None:
     if not _is_supported_input_path(path):
-        parser.error(
-            f"{name} must be a {_supported_input_formats_message()} file: {path}"
-        )
+        parser.error(f"{name} must be a {_supported_input_formats_message()} file: {path}")
 
 
 if __name__ == "__main__":

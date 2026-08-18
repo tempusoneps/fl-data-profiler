@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.time_series_scoring import (
@@ -100,15 +101,21 @@ def _combined_scores(component_scores: pd.DataFrame) -> pd.DataFrame:
 
     frame = component_scores.copy()
     frame["abs_score"] = frame["score"].abs()
-    max_by_component = frame.groupby(["label", "score_name"])["abs_score"].transform("max").replace(0, 1)
+    max_by_component = (
+        frame.groupby(["label", "score_name"])["abs_score"].transform("max").replace(0, 1)
+    )
     frame["normalized_score"] = frame["abs_score"] / max_by_component
-    result = frame.groupby(["feature", "label"], dropna=False).agg(
-        combined_score=("normalized_score", "mean"),
-        mean_abs_score=("abs_score", "mean"),
-        component_count=("score_name", "nunique"),
-        valid_folds=("score", "count"),
-        samples=("samples", "sum"),
-    ).reset_index()
+    result = (
+        frame.groupby(["feature", "label"], dropna=False)
+        .agg(
+            combined_score=("normalized_score", "mean"),
+            mean_abs_score=("abs_score", "mean"),
+            component_count=("score_name", "nunique"),
+            valid_folds=("score", "count"),
+            samples=("samples", "sum"),
+        )
+        .reset_index()
+    )
     return result.sort_values(
         ["combined_score", "component_count", "valid_folds"],
         ascending=[False, False, False],

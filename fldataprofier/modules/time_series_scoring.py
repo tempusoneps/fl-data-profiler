@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -24,7 +24,6 @@ from fldataprofier.utils import (
     _write_csv,
     _write_json,
 )
-
 
 SCORE_COLUMNS = [
     "feature",
@@ -173,12 +172,12 @@ def write_standard_report(
 ) -> list[Path]:
     payload = {
         "module": module_name,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "feature_csv": str(feature_csv),
         "label_csv": str(label_csv),
         "join_strategy": join_strategy,
         "targets": targets,
-        "score_rows": int(len(feature_scores)),
+        "score_rows": len(feature_scores),
     }
     if extra_summary:
         payload.update(extra_summary)
@@ -241,7 +240,11 @@ def information_coefficient_rows(
             for feature in numeric_features:
                 x = features[feature].iloc[test_start:test_end]
                 pair = pd.concat([x, y], axis=1).dropna()
-                if len(pair) < min_samples or pair.iloc[:, 0].nunique() < 2 or pair.iloc[:, 1].nunique() < 2:
+                if (
+                    len(pair) < min_samples
+                    or pair.iloc[:, 0].nunique() < 2
+                    or pair.iloc[:, 1].nunique() < 2
+                ):
                     continue
                 for score_name, method in (("pearson_ic", "pearson"), ("rank_ic", "spearman")):
                     score = pair.iloc[:, 0].corr(pair.iloc[:, 1], method=method)
@@ -253,7 +256,7 @@ def information_coefficient_rows(
                                 "label": label,
                                 "score_name": score_name,
                                 "score": float(score),
-                                "samples": int(len(pair)),
+                                "samples": len(pair),
                             }
                         )
     return rows
@@ -298,7 +301,9 @@ def permutation_importance_rows(
                     continue
                 x_fit = x_train.loc[train_mask]
                 x_eval = x_test.loc[test_mask].loc[known.index[known]]
-                y_eval = encoder.transform(test_target[test_mask].loc[known.index[known]].astype(str))
+                y_eval = encoder.transform(
+                    test_target[test_mask].loc[known.index[known]].astype(str)
+                )
                 model = RandomForestClassifier(
                     n_estimators=n_estimators,
                     max_features="sqrt",
@@ -313,7 +318,11 @@ def permutation_importance_rows(
                 y_eval_series = _numeric_series(test_target[test_mask])
                 valid_train = y_train_series.notna()
                 valid_eval = y_eval_series.notna()
-                if valid_train.sum() < 20 or valid_eval.sum() < 10 or y_train_series[valid_train].nunique() < 2:
+                if (
+                    valid_train.sum() < 20
+                    or valid_eval.sum() < 10
+                    or y_train_series[valid_train].nunique() < 2
+                ):
                     continue
                 x_fit = x_train.loc[y_train_series[valid_train].index]
                 x_eval = x_test.loc[y_eval_series[valid_eval].index]
@@ -351,7 +360,7 @@ def permutation_importance_rows(
                         "permutation_drop": drop,
                         "correlation_support": support,
                         "score": max(drop, 0.0) + support,
-                        "samples": int(len(x_eval)),
+                        "samples": len(x_eval),
                     }
                 )
     return rows
@@ -395,7 +404,7 @@ def mutual_information_scores(
                     "label": label,
                     "score_name": score_name,
                     "score": _round(float(score)),
-                    "samples": int(len(x)),
+                    "samples": len(x),
                 }
             )
     result = pd.DataFrame(rows)
@@ -442,7 +451,9 @@ def _render_report_markdown(
 
 
 def _render_report_html(markdown: str, top_scores: pd.DataFrame) -> str:
-    table = top_scores.to_html(index=False, escape=True) if not top_scores.empty else "<p>No rows.</p>"
+    table = (
+        top_scores.to_html(index=False, escape=True) if not top_scores.empty else "<p>No rows.</p>"
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Feature scoring report</title></head>

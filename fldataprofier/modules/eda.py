@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import matplotlib
@@ -17,14 +17,13 @@ from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
     _html_markdown_details,
-    _read_table,
     _markdown_table,
     _numeric_series,
+    _read_table,
     _round,
     _write_csv,
     _write_json,
 )
-
 
 MAX_CORRELATION_HEATMAP_COLUMNS = 80
 
@@ -66,7 +65,7 @@ class EdaModule:
 
             metadata = EdaRunMetadata(
                 module=self.name,
-                created_at=datetime.now(timezone.utc).isoformat(),
+                created_at=datetime.now(UTC).isoformat(),
                 feature_csv=str(feature_csv),
                 label_csv=str(label_csv),
                 feature_shape=DatasetShape(*features.shape),
@@ -79,7 +78,9 @@ class EdaModule:
             progress_bar.step("profile")
 
             numeric_summary = _numeric_summary({"feature": features, "label": selected_labels})
-            categorical_summary = _categorical_summary({"feature": features, "label": selected_labels})
+            categorical_summary = _categorical_summary(
+                {"feature": features, "label": selected_labels}
+            )
             progress_bar.step("summaries")
 
             artifacts = [
@@ -109,7 +110,9 @@ class EdaModule:
             artifacts.extend([feature_heatmap, label_heatmap])
             progress_bar.step("heatmaps")
 
-            markdown = _render_markdown(metadata, overview, column_profile, missingness, numeric_summary)
+            markdown = _render_markdown(
+                metadata, overview, column_profile, missingness, numeric_summary
+            )
             md_path = run_dir / "report.md"
             md_path.write_text(markdown, encoding="utf-8")
             artifacts.append(md_path)
@@ -145,9 +148,9 @@ def _dataset_overview(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
                 "duplicate_rows": int(frame.duplicated().sum()),
                 "total_missing": missing,
                 "total_missing_pct": _round(missing / cells * 100) if cells else None,
-                "numeric_columns": int(len(_numeric_columns(frame))),
-                "categorical_columns": int(len(_categorical_columns(frame))),
-                "datetime_columns": int(len(_datetime_columns(frame))),
+                "numeric_columns": len(_numeric_columns(frame)),
+                "categorical_columns": len(_categorical_columns(frame)),
+                "datetime_columns": len(_datetime_columns(frame)),
             }
         )
     return pd.DataFrame(rows)
@@ -166,7 +169,7 @@ def _column_profile(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
                     "column": column,
                     "dtype": str(series.dtype),
                     "inferred_type": _inferred_type(series),
-                    "rows": int(len(series)),
+                    "rows": len(series),
                     "non_null": non_null,
                     "missing": int(series.isna().sum()),
                     "missing_pct": _round(float(series.isna().mean() * 100)),
@@ -185,7 +188,9 @@ def _missingness(column_profile: pd.DataFrame) -> pd.DataFrame:
     result = column_profile[
         ["dataset", "column", "missing", "missing_pct", "non_null", "rows"]
     ].copy()
-    return result.sort_values(["missing_pct", "missing"], ascending=[False, False]).reset_index(drop=True)
+    return result.sort_values(["missing_pct", "missing"], ascending=[False, False]).reset_index(
+        drop=True
+    )
 
 
 def _numeric_summary(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -285,7 +290,9 @@ def _write_correlation_heatmap(path: Path, frame: pd.DataFrame, title: str) -> N
     ax.set_yticks(np.arange(len(corr.index)), labels=corr.index)
     display_title = title
     if original_column_count > len(numeric_columns):
-        display_title = f"{title} (first {len(numeric_columns)} of {original_column_count} numeric columns)"
+        display_title = (
+            f"{title} (first {len(numeric_columns)} of {original_column_count} numeric columns)"
+        )
     ax.set_title(display_title)
     fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
