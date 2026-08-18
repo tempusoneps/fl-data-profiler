@@ -10,8 +10,8 @@ resolution-markers = [
 
 [[package]]
 name = "autofcholv"
-version = "0.2.0"
-source = { git = "https://github.com/tempusoneps/autofcholv.git?branch=develop#766ee259eecbab1e3b4427631a33d331541704f0" }
+version = "0.3.0"
+source = { git = "https://github.com/tempusoneps/autofcholv.git?branch=develop#33c9941ca8470ed5de5c25a2d3e3ba41494ae52e" }
 dependencies = [
     { name = "pandas" },
     { name = "pandas-ta" },
