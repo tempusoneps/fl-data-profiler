@@ -86,6 +86,7 @@ fldataprofiler fit datasets/feature.parquet datasets/label.csv --module statsmod
 ### 3.4. Các Module Feature Scoring chuyên sâu khác
 
 Các module đánh giá và xếp hạng độ quan trọng đặc trưng:
+* `alphalens_analysis` (hoặc alias `alphalens`): Phân tích Factor Tearsheet theo chuẩn Alphalens (Forward Returns, Quantiles, IC Decay, Information Ratio, Long-Short Spread, Cumulative Returns).
 * `information_coefficient`: Tính chỉ số IC (Information Coefficient) chuỗi thời gian.
 * `mutual_information`: Điểm tương quan thông tin hỗ tương (Mutual Information).
 * `mrmr`: Thuật toán mRMR (Max-Relevance Min-Redundancy) lọc feature tối ưu.
@@ -100,6 +101,8 @@ Các module đánh giá và xếp hạng độ quan trọng đặc trưng:
 
 Ví dụ chạy:
 ```bash
+fldataprofiler fit datasets/feature.parquet datasets/label.csv --module alphalens_analysis
+fldataprofiler fit datasets/feature.parquet datasets/label.csv --module alphalens --limit 10000
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module mutual_information
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module mrmr
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module lightgbm

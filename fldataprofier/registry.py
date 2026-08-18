@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fldataprofier.modules.base import ProfilingModule
+from fldataprofier.modules.alphalens_analysis import AlphalensAnalysisModule
 from fldataprofier.modules.automl_autogluon import AutoGluonRelationshipsModule
 from fldataprofier.modules.boruta import BorutaRelationshipsModule
 from fldataprofier.modules.eda import EdaModule
@@ -28,6 +29,8 @@ from fldataprofier.modules.visual_regions import VisualRegionsModule
 
 
 _MODULES: dict[str, ProfilingModule] = {
+    "alphalens": AlphalensAnalysisModule(),
+    "alphalens_analysis": AlphalensAnalysisModule(),
     "autogluon": AutoGluonRelationshipsModule(),
     "boruta": BorutaRelationshipsModule(),
     "eda": EdaModule(),
