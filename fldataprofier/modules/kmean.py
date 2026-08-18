@@ -29,6 +29,7 @@ from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.progress import ModuleProgress
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
+    _FULL_ROW_MODE,
     _date_columns,
     _html_markdown_details,
     _markdown_table,
@@ -84,6 +85,8 @@ def _select_top_features_for_label(
 
 
 def _select_sequential_rows(frame: pd.DataFrame, max_rows: int) -> pd.DataFrame:
+    if _FULL_ROW_MODE.get():
+        return frame
     if len(frame) <= max_rows:
         return frame
     return frame.iloc[:max_rows]

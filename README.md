@@ -112,6 +112,7 @@ fldataprofiler fit datasets/feature.parquet datasets/label.csv --module lightgbm
 
 ## 4. Các Tham số Tùy chọn (CLI Options)
 
+* `--full`: Chạy phân tích trên **toàn bộ 100% dữ liệu** mà không thực hiện lấy mẫu rút gọn (vô hiệu hóa cơ chế internal subsampling 20k rows ở các module ML).
 * `--target <cột_nhãn>`: Chỉ định cột nhãn cụ thể cần phân tích (có thể truyền nhiều lần).
 * `--limit <N>`: Giới hạn chỉ phân tích $N$ dòng đầu tiên của dữ liệu (dùng khi thử nghiệm nhanh).
 * `--output-dir <thư_mục>`: Chỉ định thư mục lưu kết quả báo cáo (mặc định: `reports/`).
@@ -119,11 +120,12 @@ fldataprofiler fit datasets/feature.parquet datasets/label.csv --module lightgbm
 
 **Ví dụ kết hợp các tham số:**
 ```bash
+# Chạy full toàn bộ dữ liệu trên module xgboost
 fldataprofiler fit datasets/feature.parquet datasets/label.csv \
-  --module kmean \
+  --module xgboost \
   --target allow_entry \
-  --limit 20000 \
-  --output-dir reports/kmean_run
+  --full \
+  --output-dir reports/xgboost_full_run
 ```
 
 ---

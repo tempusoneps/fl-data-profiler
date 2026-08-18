@@ -88,6 +88,7 @@ fldataprofiler fit <feature_file> <label_file> --module <module_name> [OPTIONS]
 ```
 
 ### Các Tham số Tùy chọn Quan trọng:
+- `--full`: Chạy phân tích trên **toàn bộ 100% dữ liệu** (vô hiệu hóa cơ chế internal subsampling 20k rows ở các module ML).
 - `--target <tên_cột_nhãn>`: Chỉ định cột nhãn cụ thể cần phân tích (có thể truyền nhiều lần).
 - `--limit <N>`: Giới hạn chỉ lấy $N$ dòng đầu tiên để chạy thử nghiệm nhanh.
 - `--output-dir <đường_dẫn>`: Chỉ định thư mục lưu trữ artifacts báo cáo (mặc định: `reports/<module_name>/`).

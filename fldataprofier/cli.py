@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fldataprofier.registry import get_module, list_modules
 from fldataprofier.utils import (
+    _full_row_mode,
     _input_row_limit,
     _is_supported_input_path,
     _supported_input_formats_message,
@@ -47,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         help="Limit both feature and label inputs to the first N rows before generating the report.",
     )
+    fit.add_argument(
+        "--full",
+        action="store_true",
+        default=False,
+        help="Disable internal row subsampling to analyze all rows (may increase compute time for ML modules).",
+    )
 
     return parser
 
@@ -59,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         _validate_input_path(parser, "feature_csv", args.feature_csv)
         _validate_input_path(parser, "label_csv", args.label_csv)
         module = get_module(args.module)
-        with _input_row_limit(args.limit):
+        with _input_row_limit(args.limit), _full_row_mode(args.full):
             result = module.run(
                 feature_csv=args.feature_csv,
                 label_csv=args.label_csv,

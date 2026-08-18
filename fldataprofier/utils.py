@@ -12,6 +12,7 @@ import pandas as pd
 
 SUPPORTED_INPUT_SUFFIXES = (".csv", ".parquet")
 _INPUT_ROW_LIMIT: ContextVar[int | None] = ContextVar("fldataprofier_input_row_limit", default=None)
+_FULL_ROW_MODE: ContextVar[bool] = ContextVar("fldataprofier_full_row_mode", default=False)
 
 
 @contextmanager
@@ -21,6 +22,15 @@ def _input_row_limit(limit: int | None) -> Iterator[None]:
         yield
     finally:
         _INPUT_ROW_LIMIT.reset(token)
+
+
+@contextmanager
+def _full_row_mode(enabled: bool) -> Iterator[None]:
+    token = _FULL_ROW_MODE.set(enabled)
+    try:
+        yield
+    finally:
+        _FULL_ROW_MODE.reset(token)
 
 
 MODEL_RESULT_COLUMNS = [
@@ -101,6 +111,8 @@ def _date_columns(columns: list[str]) -> list[str]:
 
 
 def _sample_rows(frame: pd.DataFrame, max_rows: int, random_state: int) -> pd.DataFrame:
+    if _FULL_ROW_MODE.get():
+        return frame
     if len(frame) <= max_rows:
         return frame
     return frame.sample(n=max_rows, random_state=random_state).sort_index()
