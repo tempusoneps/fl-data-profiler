@@ -3,12 +3,13 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+
 import pandas as pd
 
-from fldataprofier.registry import get_module, list_modules
-from fldataprofier.modules.automl_flaml import FLAMLRelationshipsModule
 from fldataprofier.modules.automl_autogluon import AutoGluonRelationshipsModule
+from fldataprofier.modules.automl_flaml import FLAMLRelationshipsModule
 from fldataprofier.modules.automl_pycaret import PyCaretRelationshipsModule
+from fldataprofier.registry import get_module, list_modules
 
 
 class AutoMLTests(unittest.TestCase):

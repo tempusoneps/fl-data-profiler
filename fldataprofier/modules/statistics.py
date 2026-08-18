@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import matplotlib
@@ -15,10 +15,10 @@ import pandas as pd
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.utils import (
     _html_markdown_details,
-    _read_table_with_date_index,
     _markdown_table,
     _merge_inputs,
     _numeric_series,
+    _read_table_with_date_index,
     _round,
     _select_targets,
     _write_csv,
@@ -68,14 +68,12 @@ class StatisticsModule:
 
         feature_profile = _profile_frame(merged[feature_columns])
         label_profile = _profile_frame(merged[selected_targets])
-        correlations = _feature_label_correlations(
-            merged, feature_columns, selected_targets
-        )
+        correlations = _feature_label_correlations(merged, feature_columns, selected_targets)
         target_summary = _target_summary(merged, feature_columns, selected_targets)
 
         metadata = RunMetadata(
             module=self.name,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
             label_csv=str(label_csv),
             join_strategy=join_strategy,
@@ -125,7 +123,7 @@ def _profile_frame(frame: pd.DataFrame) -> list[dict[str, object]]:
         row: dict[str, object] = {
             "column": column,
             "dtype": str(series.dtype),
-            "rows": int(len(series)),
+            "rows": len(series),
             "missing": int(series.isna().sum()),
             "missing_pct": _round(float(series.isna().mean() * 100)),
             "unique": int(series.nunique(dropna=True)),
@@ -166,14 +164,16 @@ def _feature_label_correlations(
                     "label": label,
                     "pearson_correlation": _round(float(corr)),
                     "abs_correlation": _round(float(abs(corr))),
-                    "samples": int(len(pair)),
+                    "samples": len(pair),
                 }
             )
     columns = ["feature", "label", "pearson_correlation", "abs_correlation", "samples"]
     result = pd.DataFrame(rows, columns=columns)
     if result.empty:
         return result
-    return result.sort_values(["abs_correlation", "samples"], ascending=[False, False]).reset_index(drop=True)
+    return result.sort_values(["abs_correlation", "samples"], ascending=[False, False]).reset_index(
+        drop=True
+    )
 
 
 def _target_summary(
@@ -228,7 +228,9 @@ def _write_heatmap(path: Path, correlations: pd.DataFrame) -> None:
         plt.close(fig)
         return
 
-    pivot = correlations.pivot(index="feature", columns="label", values="pearson_correlation").fillna(0)
+    pivot = correlations.pivot(
+        index="feature", columns="label", values="pearson_correlation"
+    ).fillna(0)
     height = max(3, min(12, 0.45 * len(pivot.index) + 1.5))
     width = max(5, min(14, 1.2 * len(pivot.columns) + 4))
     fig, ax = plt.subplots(figsize=(width, height))
@@ -291,7 +293,11 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, correlations: pd.DataFrame) -> str:
-    table = correlations.head(25).to_html(index=False, classes="data-table") if not correlations.empty else ""
+    table = (
+        correlations.head(25).to_html(index=False, classes="data-table")
+        if not correlations.empty
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>

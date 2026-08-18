@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import matplotlib
@@ -219,12 +219,14 @@ def _evaluate_feature_factor(
     # Quantile DataFrame summary
     q_rows = []
     for q_idx in sorted(q_mean_returns.keys()):
-        q_rows.append({
-            "feature": feature_name,
-            "quantile": q_idx,
-            "mean_return": _round(q_mean_returns[q_idx]),
-            "samples": int((quantiles == (q_idx - 1)).sum()),
-        })
+        q_rows.append(
+            {
+                "feature": feature_name,
+                "quantile": q_idx,
+                "mean_return": _round(q_mean_returns[q_idx]),
+                "samples": int((quantiles == (q_idx - 1)).sum()),
+            }
+        )
     q_df = pd.DataFrame(q_rows)
 
     return metrics, q_mean_returns, q_df
@@ -337,9 +339,22 @@ def _write_cumulative_spread_chart(
     cum_spread = np.cumprod(1 + r_spread) - 1
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(cum_top * 100, label=f"Top Quantile (Q{q_max+1}) Long", color="#2ca02c", linewidth=1.5)
-    ax.plot(cum_bottom * 100, label=f"Bottom Quantile (Q{q_min+1}) Short-Target", color="#d62728", linewidth=1.5)
-    ax.plot(cum_spread * 100, label="Long-Short Spread Portfolio (Q_top - Q_bot)", color="#1f77b4", linewidth=2.0, linestyle="--")
+    ax.plot(
+        cum_top * 100, label=f"Top Quantile (Q{q_max + 1}) Long", color="#2ca02c", linewidth=1.5
+    )
+    ax.plot(
+        cum_bottom * 100,
+        label=f"Bottom Quantile (Q{q_min + 1}) Short-Target",
+        color="#d62728",
+        linewidth=1.5,
+    )
+    ax.plot(
+        cum_spread * 100,
+        label="Long-Short Spread Portfolio (Q_top - Q_bot)",
+        color="#1f77b4",
+        linewidth=2.0,
+        linestyle="--",
+    )
 
     ax.set_xlabel("Time Index / Bar Sequence")
     ax.set_ylabel("Cumulative Compounded Return (%)")
@@ -371,13 +386,17 @@ def _generate_alphalens_insights(
     )
 
     # Long-Short Spread
-    spread_direction = "Positive (Long High / Short Low)" if (top_by_spread['long_short_spread'] or 0) > 0 else "Inverted (Short High / Long Low)"
+    spread_direction = (
+        "Positive (Long High / Short Low)"
+        if (top_by_spread["long_short_spread"] or 0) > 0
+        else "Inverted (Short High / Long Low)"
+    )
     insights.append(
         f"💰 **Widest Long-Short Spread**: `{top_by_spread['feature']}` with **Spread = {top_by_spread['long_short_spread']}** ({spread_direction})."
     )
 
     # Monotonicity
-    if (top_monotonic['monotonicity_score'] or 0) >= 0.8:
+    if (top_monotonic["monotonicity_score"] or 0) >= 0.8:
         insights.append(
             f"📈 **Strong Monotonic Factor**: `{top_monotonic['feature']}` has Monotonicity Score = **{top_monotonic['monotonicity_score']}** (Quantiles scale predictably with returns)."
         )
@@ -400,22 +419,38 @@ def _render_markdown(
     quantile_df: pd.DataFrame,
     chart_artifacts: list[Path],
 ) -> str:
-    insights_text = "\n".join([f"- {insight}" for insight in insights]) if insights else "- No specific insights generated."
-    
-    top_table_df = metrics_df.head(25)[[
-        "feature",
-        "rank_ic",
-        "mean_ic",
-        "ic_std",
-        "ir",
-        "ic_p_value",
-        "positive_ic_ratio",
-        "long_short_spread",
-        "monotonicity_score",
-    ]] if not metrics_df.empty else pd.DataFrame()
+    insights_text = (
+        "\n".join([f"- {insight}" for insight in insights])
+        if insights
+        else "- No specific insights generated."
+    )
 
-    top_table = _markdown_table(top_table_df) if not top_table_df.empty else "No feature metrics evaluated."
-    quantile_table = _markdown_table(quantile_df.head(20)) if not quantile_df.empty else "No quantile details available."
+    top_table_df = (
+        metrics_df.head(25)[
+            [
+                "feature",
+                "rank_ic",
+                "mean_ic",
+                "ic_std",
+                "ir",
+                "ic_p_value",
+                "positive_ic_ratio",
+                "long_short_spread",
+                "monotonicity_score",
+            ]
+        ]
+        if not metrics_df.empty
+        else pd.DataFrame()
+    )
+
+    top_table = (
+        _markdown_table(top_table_df) if not top_table_df.empty else "No feature metrics evaluated."
+    )
+    quantile_table = (
+        _markdown_table(quantile_df.head(20))
+        if not quantile_df.empty
+        else "No quantile details available."
+    )
 
     images_text = ""
     if chart_artifacts:
@@ -526,7 +561,9 @@ class AlphalensAnalysisModule:
             if not metrics_df.empty:
                 # Sort by absolute IR descending
                 metrics_df["abs_ir"] = metrics_df["ir"].abs()
-                metrics_df = metrics_df.sort_values(by="abs_ir", ascending=False).drop(columns=["abs_ir"])
+                metrics_df = metrics_df.sort_values(by="abs_ir", ascending=False).drop(
+                    columns=["abs_ir"]
+                )
             progress_bar.step("rank_factors")
 
             # 3. Prepare Visuals
@@ -535,7 +572,11 @@ class AlphalensAnalysisModule:
                 # Quantile chart for top 3
                 top_3_names = metrics_df.head(3)["feature"].tolist()
                 for name in top_3_names:
-                    matching_q = [df for df in all_quantile_dfs if not df.empty and df.iloc[0]["feature"] == name]
+                    matching_q = [
+                        df
+                        for df in all_quantile_dfs
+                        if not df.empty and df.iloc[0]["feature"] == name
+                    ]
                     if matching_q:
                         top_quantile_charts_data.append((name, matching_q[0]))
 
@@ -546,7 +587,9 @@ class AlphalensAnalysisModule:
 
                 # 3.2. IC Decay Chart
                 ic_chart_path = run_dir / "ic_decay.png"
-                horizons_to_plot = [f"fwd_ret_{h}" for h in DEFAULT_HORIZONS if f"fwd_ret_{h}" in fwd_returns]
+                horizons_to_plot = [
+                    f"fwd_ret_{h}" for h in DEFAULT_HORIZONS if f"fwd_ret_{h}" in fwd_returns
+                ]
                 if not horizons_to_plot:
                     horizons_to_plot = list(fwd_returns.keys())[:4]
                 if _write_ic_decay_chart(ic_chart_path, metrics_df, horizons_to_plot):
@@ -555,16 +598,22 @@ class AlphalensAnalysisModule:
                 # 3.3. Cumulative Spread Chart for #1 Top Feature
                 cum_chart_path = run_dir / "cumulative_spread.png"
                 best_feature = metrics_df.iloc[0]["feature"]
-                if _write_cumulative_spread_chart(cum_chart_path, merged, best_feature, primary_ret_name, fwd_returns):
+                if _write_cumulative_spread_chart(
+                    cum_chart_path, merged, best_feature, primary_ret_name, fwd_returns
+                ):
                     chart_artifacts.append(cum_chart_path)
             progress_bar.step("generate_charts")
 
             # 4. Generate Reports & Artifacts
-            quantile_full_df = pd.concat(all_quantile_dfs, ignore_index=True) if all_quantile_dfs else pd.DataFrame()
+            quantile_full_df = (
+                pd.concat(all_quantile_dfs, ignore_index=True)
+                if all_quantile_dfs
+                else pd.DataFrame()
+            )
 
             metadata = AlphalensRunMetadata(
                 module=self.name,
-                created_at=datetime.now(timezone.utc).isoformat(),
+                created_at=datetime.now(UTC).isoformat(),
                 feature_csv=str(feature_csv),
                 label_csv=str(label_csv),
                 join_strategy=join_strategy,
@@ -579,7 +628,9 @@ class AlphalensAnalysisModule:
             )
 
             insights = _generate_alphalens_insights(metrics_df, primary_ret_name)
-            markdown = _render_markdown(metadata, insights, metrics_df, quantile_full_df, chart_artifacts)
+            markdown = _render_markdown(
+                metadata, insights, metrics_df, quantile_full_df, chart_artifacts
+            )
 
             report_md_path = run_dir / "report.md"
             report_md_path.write_text(markdown, encoding="utf-8")
@@ -589,7 +640,9 @@ class AlphalensAnalysisModule:
                 {
                     "metadata": asdict(metadata),
                     "insights": insights,
-                    "top_factors": metrics_df.head(20).to_dict(orient="records") if not metrics_df.empty else [],
+                    "top_factors": metrics_df.head(20).to_dict(orient="records")
+                    if not metrics_df.empty
+                    else [],
                 },
             )
 

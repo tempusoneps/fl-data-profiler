@@ -87,9 +87,13 @@ def _gbm_scores(prepared, n_estimators: int, random_state: int) -> tuple[pd.Data
             if len(np.unique(y)) < 2:
                 continue
             if lightgbm is not None:
-                model = lightgbm.LGBMClassifier(n_estimators=n_estimators, random_state=random_state, verbose=-1)
+                model = lightgbm.LGBMClassifier(
+                    n_estimators=n_estimators, random_state=random_state, verbose=-1
+                )
             else:
-                model = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state, n_jobs=-1)
+                model = RandomForestClassifier(
+                    n_estimators=n_estimators, random_state=random_state, n_jobs=-1
+                )
         else:
             y_series = _numeric_series(y_raw[mask])
             valid = y_series.notna()
@@ -98,9 +102,13 @@ def _gbm_scores(prepared, n_estimators: int, random_state: int) -> tuple[pd.Data
             x = x.loc[y_series[valid].index]
             y = y_series[valid].to_numpy()
             if lightgbm is not None:
-                model = lightgbm.LGBMRegressor(n_estimators=n_estimators, random_state=random_state, verbose=-1)
+                model = lightgbm.LGBMRegressor(
+                    n_estimators=n_estimators, random_state=random_state, verbose=-1
+                )
             else:
-                model = RandomForestRegressor(n_estimators=n_estimators, random_state=random_state, n_jobs=-1)
+                model = RandomForestRegressor(
+                    n_estimators=n_estimators, random_state=random_state, n_jobs=-1
+                )
         model.fit(x, y)
         importances = getattr(model, "feature_importances_", np.zeros(len(features)))
         for feature, score in zip(features, importances, strict=False):
@@ -112,7 +120,7 @@ def _gbm_scores(prepared, n_estimators: int, random_state: int) -> tuple[pd.Data
                     "score": float(score),
                     "importance_type": "split",
                     "backend": backend,
-                    "samples": int(len(x)),
+                    "samples": len(x),
                 }
             )
     scores = pd.DataFrame(rows)

@@ -111,7 +111,7 @@ def _linear_scores(prepared, random_state: int) -> pd.DataFrame:
                     "coefficient": float(coefficient),
                     "abs_coefficient": abs(float(coefficient)),
                     "model_type": model_type,
-                    "samples": int(len(x)),
+                    "samples": len(x),
                 }
             )
     return pd.DataFrame(rows).sort_values("abs_coefficient", ascending=False).reset_index(drop=True)

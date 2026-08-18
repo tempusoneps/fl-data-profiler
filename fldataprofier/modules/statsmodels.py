@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -11,19 +11,18 @@ import statsmodels.api as sm
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.statistics import DatasetShape
 from fldataprofier.utils import (
-    _html_markdown_details,
-    _read_table_with_date_index,
     _date_columns,
+    _html_markdown_details,
     _markdown_table,
     _merge_inputs,
     _numeric_series,
+    _read_table_with_date_index,
     _round,
     _sample_rows,
     _select_targets,
     _write_csv,
     _write_json,
 )
-
 
 MAX_ROWS = 50_000
 MAX_FEATURES_PER_LABEL = 25
@@ -68,15 +67,19 @@ class StatsmodelsRelationshipsModule:
         label_columns = [column for column in label_columns if column not in ignored_columns]
         selected_targets = _select_targets(label_columns, targets)
 
-        model_frame = _sample_rows(merged[[*feature_columns, *selected_targets]], MAX_ROWS, RANDOM_STATE)
-        model_results, coefficients = _fit_ols_models(model_frame, feature_columns, selected_targets)
+        model_frame = _sample_rows(
+            merged[[*feature_columns, *selected_targets]], MAX_ROWS, RANDOM_STATE
+        )
+        model_results, coefficients = _fit_ols_models(
+            model_frame, feature_columns, selected_targets
+        )
 
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
         metadata = StatsmodelsRunMetadata(
             module=self.name,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
             label_csv=str(label_csv),
             join_strategy=join_strategy,
@@ -198,7 +201,7 @@ def _fit_single_ols(
             "label": label,
             "model": "OLS",
             "samples": int(model.nobs),
-            "features": int(len(features.columns)),
+            "features": len(features.columns),
             "r_squared": _round(float(model.rsquared)),
             "adjusted_r_squared": _round(float(model.rsquared_adj)),
             "f_statistic": _round(float(model.fvalue)),
@@ -228,7 +231,9 @@ def _model_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     frame = pd.DataFrame(rows, columns=columns)
     if frame.empty:
         return frame
-    return frame.sort_values(["adjusted_r_squared", "samples"], ascending=[False, False], na_position="last").reset_index(drop=True)
+    return frame.sort_values(
+        ["adjusted_r_squared", "samples"], ascending=[False, False], na_position="last"
+    ).reset_index(drop=True)
 
 
 def _coefficient_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
@@ -247,13 +252,19 @@ def _coefficient_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     frame = pd.DataFrame(rows, columns=columns)
     if frame.empty:
         return frame
-    return frame.sort_values(["label", "p_value", "abs_coefficient"], ascending=[True, True, False], na_position="last").reset_index(drop=True)
+    return frame.sort_values(
+        ["label", "p_value", "abs_coefficient"], ascending=[True, True, False], na_position="last"
+    ).reset_index(drop=True)
 
 
 def _render_markdown(
     metadata: StatsmodelsRunMetadata, model_results: pd.DataFrame, coefficients: pd.DataFrame
 ) -> str:
-    scores = _markdown_table(model_results) if not model_results.empty else "No statsmodels OLS models were available."
+    scores = (
+        _markdown_table(model_results)
+        if not model_results.empty
+        else "No statsmodels OLS models were available."
+    )
     top_coefficients = (
         _markdown_table(coefficients.groupby("label", group_keys=False).head(10))
         if not coefficients.empty
@@ -294,9 +305,13 @@ def _render_markdown(
 
 
 def _render_html(markdown: str, model_results: pd.DataFrame, coefficients: pd.DataFrame) -> str:
-    scores = model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
+    scores = (
+        model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
+    )
     top_coefficients = (
-        coefficients.groupby("label", group_keys=False).head(20).to_html(index=False, classes="data-table")
+        coefficients.groupby("label", group_keys=False)
+        .head(20)
+        .to_html(index=False, classes="data-table")
         if not coefficients.empty
         else ""
     )

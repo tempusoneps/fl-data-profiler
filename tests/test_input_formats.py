@@ -18,15 +18,20 @@ class InputFormatTests(unittest.TestCase):
     def test_cli_rejects_unsupported_feature_extension_before_loading_module(self) -> None:
         stderr = io.StringIO()
 
-        with patch("fldataprofier.cli.get_module") as get_module, contextlib.redirect_stderr(stderr):
+        with (
+            patch("fldataprofier.cli.get_module") as get_module,
+            contextlib.redirect_stderr(stderr),
+        ):
             with self.assertRaises(SystemExit) as raised:
-                cli.main([
-                    "fit",
-                    "feature.json",
-                    "label.csv",
-                    "--module",
-                    "statistics",
-                ])
+                cli.main(
+                    [
+                        "fit",
+                        "feature.json",
+                        "label.csv",
+                        "--module",
+                        "statistics",
+                    ]
+                )
 
         self.assertEqual(2, raised.exception.code)
         get_module.assert_not_called()
@@ -64,7 +69,6 @@ class InputFormatTests(unittest.TestCase):
 
         self.assertEqual(["Date", "target"], list(frame.columns))
         self.assertTrue(pd.api.types.is_datetime64_any_dtype(frame["Date"]))
-
 
     def test_cli_limit_applies_to_feature_and_label_reads(self) -> None:
         captured_shapes: list[tuple[int, int]] = []
@@ -112,7 +116,10 @@ class InputFormatTests(unittest.TestCase):
     def test_cli_rejects_non_positive_limit_before_loading_module(self) -> None:
         stderr = io.StringIO()
 
-        with patch("fldataprofier.cli.get_module") as get_module, contextlib.redirect_stderr(stderr):
+        with (
+            patch("fldataprofier.cli.get_module") as get_module,
+            contextlib.redirect_stderr(stderr),
+        ):
             with self.assertRaises(SystemExit) as raised:
                 cli.main(
                     [

@@ -44,8 +44,8 @@ class XGBoostTests(unittest.TestCase):
                     "label": label,
                     "task": "classification",
                     "model": "FakeXGBClassifier",
-                    "samples": int(len(target)),
-                    "features": int(len(features.columns)),
+                    "samples": len(target),
+                    "features": len(features.columns),
                     "score_train": 1.0,
                     "score_primary": 1.0,
                     "overfit_gap": 0.0,
@@ -82,9 +82,12 @@ class XGBoostTests(unittest.TestCase):
             features.to_csv(feature_csv, index=False)
             labels.to_csv(label_csv, index=False)
 
-            with patch("fldataprofier.modules.progress.tqdm", fake_tqdm), patch(
-                "fldataprofier.modules.xgboost._fit_classification",
-                fake_classification,
+            with (
+                patch("fldataprofier.modules.progress.tqdm", fake_tqdm),
+                patch(
+                    "fldataprofier.modules.xgboost._fit_classification",
+                    fake_classification,
+                ),
             ):
                 XGBoostRelationshipsModule(progress=True).run(
                     feature_csv,
@@ -125,6 +128,7 @@ class XGBoostTests(unittest.TestCase):
                 lbl_path,
                 tmp_path / "out",
             )
+            self.assertTrue(result.report_dir.exists())
             self.assertTrue((tmp_path / "out" / "xgboost" / "report.md").exists())
             self.assertTrue((tmp_path / "out" / "xgboost" / "scores.csv").exists())
 

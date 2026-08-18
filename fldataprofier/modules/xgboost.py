@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import matplotlib
@@ -20,7 +20,6 @@ from sklearn.metrics import (
     mean_squared_error,
     r2_score,
 )
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from xgboost import XGBClassifier, XGBRegressor
 
@@ -32,7 +31,6 @@ from fldataprofier.utils import (
     _html_markdown_details,
     _markdown_table,
     _merge_inputs,
-    _numeric_feature_columns,
     _numeric_series,
     _read_table_with_date_index,
     _round,
@@ -109,8 +107,12 @@ class XGBoostRelationshipsModule:
         selected_targets = _select_targets(label_columns, targets)
         valid_features = _all_valid_feature_columns(merged, feature_columns)
 
-        model_frame = _sample_rows(merged[[*valid_features, *selected_targets]], MAX_ROWS, RANDOM_STATE)
-        with ModuleProgress(self.name, total=len(selected_targets), enabled=self.progress) as progress_bar:
+        model_frame = _sample_rows(
+            merged[[*valid_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
+        )
+        with ModuleProgress(
+            self.name, total=len(selected_targets), enabled=self.progress
+        ) as progress_bar:
             model_results, importances, per_class_df, cm_dict, reg_preds_dict = _fit_target_models(
                 model_frame,
                 valid_features,
@@ -136,9 +138,11 @@ class XGBoostRelationshipsModule:
         if reg_preds_dict:
             best_reg_label = max(
                 reg_preds_dict.keys(),
-                key=lambda l: model_results.loc[model_results["label"] == l, "score_primary"].values[0]
-                if not model_results.loc[model_results["label"] == l, "score_primary"].empty
-                else -999,
+                key=lambda lbl: (
+                    model_results.loc[model_results["label"] == lbl, "score_primary"].values[0]
+                    if not model_results.loc[model_results["label"] == lbl, "score_primary"].empty
+                    else -999
+                ),
             )
             y_true, y_pred = reg_preds_dict[best_reg_label]
             reg_chart_path = run_dir / "regression_pred_vs_actual.png"
@@ -147,7 +151,7 @@ class XGBoostRelationshipsModule:
 
         metadata = XGBoostRunMetadata(
             module=self.name,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
             label_csv=str(label_csv),
             join_strategy=join_strategy,
@@ -179,13 +183,18 @@ class XGBoostRelationshipsModule:
             *chart_artifacts,
         ]
 
-        markdown = _render_markdown(metadata, insights, model_results, per_class_df, importances, chart_artifacts)
+        markdown = _render_markdown(
+            metadata, insights, model_results, per_class_df, importances, chart_artifacts
+        )
         md_path = run_dir / "report.md"
         md_path.write_text(markdown, encoding="utf-8")
         artifacts.append(md_path)
 
         html_path = run_dir / "report.html"
-        html_path.write_text(_render_html(markdown, model_results, per_class_df, importances, chart_artifacts), encoding="utf-8")
+        html_path.write_text(
+            _render_html(markdown, model_results, per_class_df, importances, chart_artifacts),
+            encoding="utf-8",
+        )
         artifacts.append(html_path)
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
@@ -248,8 +257,7 @@ def _fit_target_models(
         y_raw = merged[label]
         y_numeric = _numeric_series(y_raw)
         is_numeric_target = (
-            y_numeric.notna().sum() >= 10
-            and y_numeric.nunique(dropna=True) > MAX_CLASS_COUNT
+            y_numeric.notna().sum() >= 10 and y_numeric.nunique(dropna=True) > MAX_CLASS_COUNT
         )
         if is_numeric_target:
             result, importance, (y_test, predictions) = _fit_regression(label, x, y_numeric)
@@ -319,8 +327,8 @@ def _fit_regression(
             "label": label,
             "task": "regression",
             "model": "XGBRegressor",
-            "samples": int(len(frame)),
-            "features": int(len(features.columns)),
+            "samples": len(frame),
+            "features": len(features.columns),
             "score_train": _round(train_r2),
             "score_primary": _round(test_r2),
             "overfit_gap": _round(train_r2 - test_r2),
@@ -391,7 +399,14 @@ def _fit_classification(
 
     # Per-class metrics
     all_labels = list(range(len(class_names)))
-    report = classification_report(y_test, test_preds, labels=all_labels, target_names=class_names, output_dict=True, zero_division=0)
+    report = classification_report(
+        y_test,
+        test_preds,
+        labels=all_labels,
+        target_names=class_names,
+        output_dict=True,
+        zero_division=0,
+    )
     per_class_rows: list[dict[str, object]] = []
     for c_name in class_names:
         if c_name in report:
@@ -414,8 +429,8 @@ def _fit_classification(
             "label": label,
             "task": "classification",
             "model": "XGBClassifier",
-            "samples": int(len(frame)),
-            "features": int(len(features.columns)),
+            "samples": len(frame),
+            "features": len(features.columns),
             "score_train": _round(train_bal_acc),
             "score_primary": _round(test_bal_acc),
             "overfit_gap": _round(train_bal_acc - test_bal_acc),
@@ -487,7 +502,11 @@ def _write_per_label_importance_chart(
     label_df = importances[importances["label"] == label]
     if label_df.empty:
         return None
-    top = label_df.sort_values("importance", ascending=False).head(15).sort_values("importance", ascending=True)
+    top = (
+        label_df.sort_values("importance", ascending=False)
+        .head(15)
+        .sort_values("importance", ascending=True)
+    )
     if top.empty or top["importance"].sum() == 0:
         return None
     fig, ax = plt.subplots(figsize=(9, 6))
@@ -574,9 +593,13 @@ def _generate_executive_insights(
                 f"**Best Classification Target**: `{top_cls['label']}` achieved Balanced Accuracy = **{top_cls['score_primary']}** (Accuracy = {top_cls['accuracy']})."
             )
 
-    overfitted = model_results[model_results["overfit_gap"].notna() & (model_results["overfit_gap"] > 0.15)]
+    overfitted = model_results[
+        model_results["overfit_gap"].notna() & (model_results["overfit_gap"] > 0.15)
+    ]
     if not overfitted.empty:
-        labels_str = ", ".join([f"`{row['label']}` (Gap: {row['overfit_gap']})" for _, row in overfitted.iterrows()])
+        labels_str = ", ".join(
+            [f"`{row['label']}` (Gap: {row['overfit_gap']})" for _, row in overfitted.iterrows()]
+        )
         insights.append(
             f"⚠️ **Overfitting Warning**: The following targets have Train vs Test gap > 15%: {labels_str}. Consider reducing `max_depth` or increasing `subsample`."
         )
@@ -586,7 +609,12 @@ def _generate_executive_insights(
         for target_label in key_labels:
             target_imps = importances[importances["label"] == target_label].head(3)
             if not target_imps.empty:
-                top_3_str = ", ".join([f"`{row['feature']}` ({row['importance']:.4f})" for _, row in target_imps.iterrows()])
+                top_3_str = ", ".join(
+                    [
+                        f"`{row['feature']}` ({row['importance']:.4f})"
+                        for _, row in target_imps.iterrows()
+                    ]
+                )
                 insights.append(f"⭐ **Top Features for `{target_label}`**: {top_3_str}.")
 
     if not per_class_df.empty:
@@ -607,18 +635,37 @@ def _render_markdown(
     importances: pd.DataFrame,
     chart_artifacts: list[Path],
 ) -> str:
-    scores = _markdown_table(model_results) if not model_results.empty else "No XGBoost models were available."
-    per_class_table = _markdown_table(per_class_df) if not per_class_df.empty else "No per-class metrics available."
+    scores = (
+        _markdown_table(model_results)
+        if not model_results.empty
+        else "No XGBoost models were available."
+    )
+    per_class_table = (
+        _markdown_table(per_class_df)
+        if not per_class_df.empty
+        else "No per-class metrics available."
+    )
     top_importance_blocks: list[str] = []
     if not importances.empty:
         for lbl in metadata.targets:
             lbl_df = importances[importances["label"] == lbl].head(10)
             if not lbl_df.empty:
-                top_importance_blocks.append(f"### Feature Importance: `{lbl}`\n\n" + _markdown_table(lbl_df[["feature", "importance", "importance_name"]]))
-    top_importance = "\n\n".join(top_importance_blocks) if top_importance_blocks else "No feature importance was available."
+                top_importance_blocks.append(
+                    f"### Feature Importance: `{lbl}`\n\n"
+                    + _markdown_table(lbl_df[["feature", "importance", "importance_name"]])
+                )
+    top_importance = (
+        "\n\n".join(top_importance_blocks)
+        if top_importance_blocks
+        else "No feature importance was available."
+    )
     ignored = ", ".join(metadata.ignored_columns) if metadata.ignored_columns else "none"
 
-    insights_text = "\n".join([f"- {insight}" for insight in insights]) if insights else "- No specific warnings."
+    insights_text = (
+        "\n".join([f"- {insight}" for insight in insights])
+        if insights
+        else "- No specific warnings."
+    )
 
     images_text = ""
     if chart_artifacts:
@@ -675,14 +722,25 @@ def _render_html(
     importances: pd.DataFrame,
     chart_artifacts: list[Path],
 ) -> str:
-    scores = model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
-    per_class = per_class_df.to_html(index=False, classes="data-table") if not per_class_df.empty else ""
+    scores = (
+        model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
+    )
+    per_class = (
+        per_class_df.to_html(index=False, classes="data-table") if not per_class_df.empty else ""
+    )
     top_importance = (
-        importances.groupby("label", group_keys=False).head(20).to_html(index=False, classes="data-table")
+        importances.groupby("label", group_keys=False)
+        .head(20)
+        .to_html(index=False, classes="data-table")
         if not importances.empty
         else ""
     )
-    charts_html = "".join([f'<div style="margin-top: 20px;"><img src="{p.name}" style="max-width: 100%; border-radius: 8px;"></div>' for p in chart_artifacts])
+    charts_html = "".join(
+        [
+            f'<div style="margin-top: 20px;"><img src="{p.name}" style="max-width: 100%; border-radius: 8px;"></div>'
+            for p in chart_artifacts
+        ]
+    )
 
     return f"""<!doctype html>
 <html lang="en">

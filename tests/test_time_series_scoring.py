@@ -56,9 +56,10 @@ class TimeSeriesScoringUtilityTests(unittest.TestCase):
         self.assertEqual(-0.7, round(float(result.iloc[0]["mean_score"]), 3))
         self.assertEqual(0.7, round(float(result.iloc[0]["mean_abs_score"]), 3))
 
-
     def test_permutation_importance_uses_serial_random_forest_jobs(self) -> None:
-        from fldataprofier.modules.time_series_scoring import permutation_importance_rows
+        from fldataprofier.modules.time_series_scoring import (
+            permutation_importance_rows,
+        )
 
         captured_n_jobs: list[int | None] = []
 

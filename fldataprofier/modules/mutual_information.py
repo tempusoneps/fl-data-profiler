@@ -4,7 +4,11 @@ from pathlib import Path
 
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.time_series_scoring import build_result, load_prepared_data, mutual_information_scores
+from fldataprofier.modules.time_series_scoring import (
+    build_result,
+    load_prepared_data,
+    mutual_information_scores,
+)
 from fldataprofier.utils import _write_csv
 
 

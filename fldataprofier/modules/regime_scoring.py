@@ -6,8 +6,12 @@ import pandas as pd
 
 from fldataprofier.modules.base import ModuleResult
 from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.time_series_scoring import aggregate_scores, build_result, load_prepared_data
-from fldataprofier.modules.time_series_scoring import information_coefficient_rows
+from fldataprofier.modules.time_series_scoring import (
+    aggregate_scores,
+    build_result,
+    information_coefficient_rows,
+    load_prepared_data,
+)
 from fldataprofier.utils import _numeric_series, _write_csv
 
 
@@ -31,7 +35,9 @@ class RegimeScoringModule:
             report_dir = output_dir / self.name
             report_dir.mkdir(parents=True, exist_ok=True)
             progress_bar.step("load")
-            regimes = _assign_regimes(prepared.merged, prepared.feature_columns, prepared.target_columns, self.n_regimes)
+            regimes = _assign_regimes(
+                prepared.merged, prepared.feature_columns, prepared.target_columns, self.n_regimes
+            )
             progress_bar.step("regimes")
             rows: list[dict[str, object]] = []
             for regime, index in regimes.groupby(regimes).groups.items():
@@ -51,9 +57,15 @@ class RegimeScoringModule:
             raw = pd.DataFrame(rows)
             summary = aggregate_scores(raw.to_dict(orient="records"))
             if not raw.empty:
-                regimes_by_feature = raw.groupby(["feature", "label", "score_name"])["regime"].nunique().reset_index()
+                regimes_by_feature = (
+                    raw.groupby(["feature", "label", "score_name"])["regime"]
+                    .nunique()
+                    .reset_index()
+                )
                 regimes_by_feature = regimes_by_feature.rename(columns={"regime": "regime_count"})
-                summary = summary.merge(regimes_by_feature, on=["feature", "label", "score_name"], how="left")
+                summary = summary.merge(
+                    regimes_by_feature, on=["feature", "label", "score_name"], how="left"
+                )
                 summary["regime"] = "all"
             else:
                 summary["regime"] = []
@@ -109,4 +121,6 @@ def _assign_regimes(
     labels = ["low", "mid", "high"][:n_regimes]
     if len(labels) < n_regimes:
         labels = [f"regime_{index + 1}" for index in range(n_regimes)]
-    return pd.qcut(regime_source.rank(method="first"), q=n_regimes, labels=labels, duplicates="drop")
+    return pd.qcut(
+        regime_source.rank(method="first"), q=n_regimes, labels=labels, duplicates="drop"
+    )
