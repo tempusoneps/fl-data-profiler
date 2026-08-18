@@ -86,7 +86,7 @@ fldataprofiler fit datasets/feature.parquet datasets/label.csv --module statsmod
 ### 3.4. Các Module Feature Scoring chuyên sâu khác
 
 Các module đánh giá và xếp hạng độ quan trọng đặc trưng:
-* `alphalens_analysis` (hoặc alias `alphalens`): Phân tích Factor Tearsheet theo chuẩn Alphalens (Forward Returns, Quantiles, IC Decay, Information Ratio, Long-Short Spread, Cumulative Returns).
+* `alphalens`: Phân tích Factor Tearsheet theo chuẩn Alphalens (Forward Returns, Quantiles, IC Decay, Information Ratio, Long-Short Spread, Cumulative Returns).
 * `information_coefficient`: Tính chỉ số IC (Information Coefficient) chuỗi thời gian.
 * `mutual_information`: Điểm tương quan thông tin hỗ tương (Mutual Information).
 * `mrmr`: Thuật toán mRMR (Max-Relevance Min-Redundancy) lọc feature tối ưu.
@@ -101,7 +101,7 @@ Các module đánh giá và xếp hạng độ quan trọng đặc trưng:
 
 Ví dụ chạy:
 ```bash
-fldataprofiler fit datasets/feature.parquet datasets/label.csv --module alphalens_analysis
+fldataprofiler fit datasets/feature.parquet datasets/label.csv --module alphalens
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module alphalens --limit 10000
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module mutual_information
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module mrmr
@@ -136,3 +136,17 @@ Mỗi module khi hoàn thành sẽ lưu báo cáo và dữ liệu thống kê v�
 * `report.html`: Báo cáo định dạng HTML tương tác kèm bảng hiển thị dữ liệu.
 * `summary.json`: File JSON chứa thông tin metadata và top các chỉ số nổi bật.
 * `*.csv`: Các file CSV chi tiết tương ứng từng module (ví dụ: `kmean_results.csv`, `cluster_label_distribution.csv`, `feature_scores.csv`, `top_features.csv`).
+
+---
+
+## 6. Tài liệu Chi tiết Từng Module
+
+Xem hướng dẫn chi tiết, nguyên lý toán học và cấu trúc dữ liệu cho từng module tại thư mục [`docs/`](docs/README.md):
+
+* 📊 **Factor & Signals**: [`alphalens.md`](docs/alphalens.md), [`information_coefficient.md`](docs/information_coefficient.md), [`signal_analysis.md`](docs/signal_analysis.md), [`regime_scoring.md`](docs/regime_scoring.md)
+* 📈 **EDA & Statistics**: [`eda.md`](docs/eda.md), [`statistics.md`](docs/statistics.md), [`scipy.md`](docs/scipy.md), [`statsmodels.md`](docs/statsmodels.md)
+* 🔍 **Clustering & Rules**: [`kmean.md`](docs/kmean.md), [`visual_regions.md`](docs/visual_regions.md)
+* 🎯 **Feature Selection**: [`mrmr.md`](docs/mrmr.md), [`mutual_information.md`](docs/mutual_information.md), [`permutation_importance_ts.md`](docs/permutation_importance_ts.md), [`timeseries_importance.md`](docs/timeseries_importance.md), [`stability_selection.md`](docs/stability_selection.md), [`feature_interactions.md`](docs/feature_interactions.md), [`boruta.md`](docs/boruta.md)
+* 🤖 **Machine Learning**: [`xgboost.md`](docs/xgboost.md), [`lightgbm.md`](docs/lightgbm.md), [`shap.md`](docs/shap.md), [`sklearn.md`](docs/sklearn.md), [`regularized_linear.md`](docs/regularized_linear.md)
+* ⚡ **AutoML**: [`autogluon.md`](docs/autogluon.md), [`flaml.md`](docs/flaml.md), [`pycaret.md`](docs/pycaret.md)
+
