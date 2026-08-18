@@ -11,4 +11,5 @@ __pycache__/
 *$py.class
 *.parquet
 .superpowers
+.pytest_cache
 docs/superpowers
