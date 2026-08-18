@@ -490,7 +490,7 @@ Factors are ranked by Information Ratio (IR = Mean IC / Std IC) and Long-Short R
 
 
 class AlphalensAnalysisModule:
-    name = "alphalens_analysis"
+    name = "alphalens"
 
     def __init__(self, progress: bool | None = None) -> None:
         self.progress = progress

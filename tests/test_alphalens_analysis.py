@@ -76,7 +76,7 @@ class AlphalensAnalysisModuleTests(unittest.TestCase):
 
             # 1. Verify report directory and artifacts
             self.assertTrue(result.report_dir.exists())
-            self.assertEqual(result.report_dir.name, "alphalens_analysis")
+            self.assertEqual(result.report_dir.name, "alphalens")
 
             report_md = result.report_dir / "report.md"
             summary_json = result.report_dir / "summary.json"
