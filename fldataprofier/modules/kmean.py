@@ -471,16 +471,22 @@ MAX_SILHOUETTE_SAMPLES = 1_000
 
 
 def _safe_silhouette(features: np.ndarray, clusters: np.ndarray) -> float | None:
-    unique_clusters = np.unique(clusters)
-    if len(unique_clusters) < 2 or len(unique_clusters) >= len(features):
+    try:
+        unique_clusters = np.unique(clusters)
+        if len(unique_clusters) < 2 or len(unique_clusters) >= len(features):
+            return None
+        sample_features, sample_clusters = _silhouette_sample(
+            features,
+            clusters,
+            MAX_SILHOUETTE_SAMPLES,
+            RANDOM_STATE,
+        )
+        sample_unique = np.unique(sample_clusters)
+        if len(sample_unique) < 2 or len(sample_unique) >= len(sample_features):
+            return None
+        return _round(float(silhouette_score(sample_features, sample_clusters)))
+    except Exception:
         return None
-    sample_features, sample_clusters = _silhouette_sample(
-        features,
-        clusters,
-        MAX_SILHOUETTE_SAMPLES,
-        RANDOM_STATE,
-    )
-    return _round(float(silhouette_score(sample_features, sample_clusters)))
 
 
 def _silhouette_sample(

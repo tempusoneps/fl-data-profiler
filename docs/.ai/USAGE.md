@@ -61,4 +61,27 @@ result = module.run(
 print(f"Report written to: {result.report_dir}")
 for artifact in result.artifacts:
     print(f"- {artifact}")
-```\n
+```
+
+## 3. Running Profiling Modules via Script
+
+Use the automated shell script to run profiling modules sequentially:
+
+```bash
+# Run default 14 fast & recommended modules (~2-4 mins)
+bash scripts/run_modules.sh
+
+# Run with row limit (e.g. 1000 rows for fast testing)
+bash scripts/run_modules.sh --limit 1000
+
+# Run all 25 modules including slow/resource-intensive modules
+bash scripts/run_modules.sh --all
+
+# Run specific modules
+bash scripts/run_modules.sh --modules statistics,eda,xgboost,lightgbm
+
+# Skip specific modules
+bash scripts/run_modules.sh --skip-modules kmean,visual_regions
+```
+
+\n

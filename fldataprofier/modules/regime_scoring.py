@@ -121,6 +121,7 @@ def _assign_regimes(
     labels = ["low", "mid", "high"][:n_regimes]
     if len(labels) < n_regimes:
         labels = [f"regime_{index + 1}" for index in range(n_regimes)]
-    return pd.qcut(
-        regime_source.rank(method="first"), q=n_regimes, labels=labels, duplicates="drop"
+    cuts = pd.qcut(
+        regime_source.rank(method="first"), q=n_regimes, labels=False, duplicates="drop"
     )
+    return cuts.map(lambda idx: labels[int(idx)] if pd.notna(idx) and int(idx) < len(labels) else "unknown")

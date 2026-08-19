@@ -194,7 +194,8 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
 ├── reports/                          # Default directory for generated run artifacts.
 ├── scripts/                          # Utility and data preparation shell scripts.
 │   ├── generate_agents_markdown.sh   # Rebuilds AGENTS.md, GEMINI.md, CLAUDE.md from docs/.ai/
-│   └── prepare_datasets.sh           # Downloads OHLCV data, generates features & labels.
+│   ├── prepare_datasets.sh           # Downloads OHLCV data, generates features & labels.
+│   └── run_modules.sh                # Sequentially executes profiling modules.
 │
 └── tests/                            # Automated test suite.
     ├── test_alphalens_analysis.py    # Tests for alphalens module.

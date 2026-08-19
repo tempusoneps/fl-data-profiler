@@ -114,4 +114,17 @@ def _linear_scores(prepared, random_state: int) -> pd.DataFrame:
                     "samples": len(x),
                 }
             )
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "feature",
+                "label",
+                "score_name",
+                "score",
+                "coefficient",
+                "abs_coefficient",
+                "model_type",
+                "samples",
+            ]
+        )
     return pd.DataFrame(rows).sort_values("abs_coefficient", ascending=False).reset_index(drop=True)
