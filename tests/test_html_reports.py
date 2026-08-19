@@ -6,7 +6,7 @@ from pathlib import Path
 
 class HtmlReportTests(unittest.TestCase):
     def test_markdown_source_is_collapsed_and_escaped(self) -> None:
-        from fldataprofier.utils import _html_markdown_details
+        from fldataprofiler.utils import _html_markdown_details
 
         html = _html_markdown_details("# Title\n<script>alert(1)</script>")
 
@@ -16,7 +16,7 @@ class HtmlReportTests(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", html)
 
     def test_report_renderers_do_not_show_full_markdown_as_visible_pre(self) -> None:
-        module_dir = Path("fldataprofier/modules")
+        module_dir = Path("fldataprofiler/modules")
         offenders: list[str] = []
         for path in module_dir.glob("*.py"):
             text = path.read_text()

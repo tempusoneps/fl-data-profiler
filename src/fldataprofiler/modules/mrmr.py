@@ -5,16 +5,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.time_series_scoring import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.time_series_scoring import (
     build_result,
     impute_numeric_frame,
     load_prepared_data,
     mutual_information_scores,
     prepare_numeric_matrix,
 )
-from fldataprofier.utils import _write_csv
+from fldataprofiler.utils import _write_csv
 
 
 class MRMRModule:

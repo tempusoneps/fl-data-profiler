@@ -10,7 +10,7 @@ import pandas as pd
 
 class EdaTests(unittest.TestCase):
     def test_progress_tracks_eda_phases(self) -> None:
-        from fldataprofier.modules.eda import EdaModule
+        from fldataprofiler.modules.eda import EdaModule
 
         class FakeProgress:
             def __init__(self, *args, **kwargs) -> None:
@@ -56,7 +56,7 @@ class EdaTests(unittest.TestCase):
                 }
             ).to_csv(label_csv, index=False)
 
-            with patch("fldataprofier.modules.progress.tqdm", fake_tqdm):
+            with patch("fldataprofiler.modules.progress.tqdm", fake_tqdm):
                 EdaModule(progress=True).run(
                     feature_csv,
                     label_csv,

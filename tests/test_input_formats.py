@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from fldataprofier import cli
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.utils import _read_table, _read_table_with_date_index
+from fldataprofiler import cli
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.utils import _read_table, _read_table_with_date_index
 
 
 class InputFormatTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class InputFormatTests(unittest.TestCase):
         stderr = io.StringIO()
 
         with (
-            patch("fldataprofier.cli.get_module") as get_module,
+            patch("fldataprofiler.cli.get_module") as get_module,
             contextlib.redirect_stderr(stderr),
         ):
             with self.assertRaises(SystemExit) as raised:
@@ -96,7 +96,7 @@ class InputFormatTests(unittest.TestCase):
             pd.DataFrame({"value": [1, 2, 3, 4]}).to_csv(feature_path, index=False)
             pd.DataFrame({"target": [5, 6, 7, 8]}).to_csv(label_path, index=False)
 
-            with patch("fldataprofier.cli.get_module", return_value=CapturingModule()):
+            with patch("fldataprofiler.cli.get_module", return_value=CapturingModule()):
                 cli.main(
                     [
                         "fit",
@@ -117,7 +117,7 @@ class InputFormatTests(unittest.TestCase):
         stderr = io.StringIO()
 
         with (
-            patch("fldataprofier.cli.get_module") as get_module,
+            patch("fldataprofiler.cli.get_module") as get_module,
             contextlib.redirect_stderr(stderr),
         ):
             with self.assertRaises(SystemExit) as raised:
@@ -151,7 +151,7 @@ class InputFormatTests(unittest.TestCase):
                 join_key: str | None = None,
                 targets: list[str] | None = None,
             ) -> ModuleResult:
-                from fldataprofier.utils import _read_table, _sample_rows
+                from fldataprofiler.utils import _read_table, _sample_rows
 
                 features = _read_table(feature_csv)
                 sampled = _sample_rows(features, max_rows=5, random_state=42)
@@ -168,7 +168,7 @@ class InputFormatTests(unittest.TestCase):
             pd.DataFrame({"target": range(50)}).to_csv(label_path, index=False)
 
             # Without --full, max_rows=5 takes 5 rows
-            with patch("fldataprofier.cli.get_module", return_value=SamplingModule()):
+            with patch("fldataprofiler.cli.get_module", return_value=SamplingModule()):
                 cli.main(
                     [
                         "fit",
@@ -182,7 +182,7 @@ class InputFormatTests(unittest.TestCase):
                 )
 
             # With --full, max_rows=5 is bypassed and takes all 50 rows
-            with patch("fldataprofier.cli.get_module", return_value=SamplingModule()):
+            with patch("fldataprofiler.cli.get_module", return_value=SamplingModule()):
                 cli.main(
                     [
                         "fit",

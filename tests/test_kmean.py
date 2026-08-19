@@ -12,7 +12,7 @@ from sklearn.exceptions import ConvergenceWarning
 
 class KMeanTests(unittest.TestCase):
     def test_skips_feature_pair_when_distinct_points_are_fewer_than_label_classes(self) -> None:
-        from fldataprofier.modules.kmean import _fit_single_kmeans
+        from fldataprofiler.modules.kmean import _fit_single_kmeans
 
         points = [(float(index), float(index % 2)) for index in range(6)]
         rows = points * 25
@@ -38,7 +38,7 @@ class KMeanTests(unittest.TestCase):
         self.assertEqual([], distribution)
 
     def test_progress_tracks_every_feature_pair_label_combination(self) -> None:
-        from fldataprofier.modules.kmean import KMeanRelationshipsModule
+        from fldataprofiler.modules.kmean import KMeanRelationshipsModule
 
         class FakeProgress:
             def __init__(self, *args, **kwargs) -> None:
@@ -87,7 +87,7 @@ class KMeanTests(unittest.TestCase):
             features.to_csv(feature_csv, index=False)
             labels.to_csv(label_csv, index=False)
 
-            with patch("fldataprofier.modules.progress.tqdm", fake_tqdm):
+            with patch("fldataprofiler.modules.progress.tqdm", fake_tqdm):
                 KMeanRelationshipsModule(progress=True).run(
                     feature_csv,
                     label_csv,
@@ -103,7 +103,7 @@ class KMeanTests(unittest.TestCase):
     def test_clustering_accuracy_computes_optimal_matching_accuracy(self) -> None:
         import numpy as np
 
-        from fldataprofier.modules.kmean import _clustering_accuracy
+        from fldataprofiler.modules.kmean import _clustering_accuracy
 
         y_true = np.array([0, 0, 0, 1, 1, 1])
         y_pred_perfect = np.array([1, 1, 1, 0, 0, 0])
@@ -113,7 +113,7 @@ class KMeanTests(unittest.TestCase):
         self.assertAlmostEqual(5 / 6, _clustering_accuracy(y_true, y_pred_imperfect))
 
     def test_select_sequential_rows_preserves_contiguous_order(self) -> None:
-        from fldataprofier.modules.kmean import _select_sequential_rows
+        from fldataprofiler.modules.kmean import _select_sequential_rows
 
         df = pd.DataFrame({"a": range(100)})
         selected = _select_sequential_rows(df, 10)
@@ -122,7 +122,7 @@ class KMeanTests(unittest.TestCase):
     def test_safe_silhouette_handles_single_cluster_in_sample(self) -> None:
         import numpy as np
 
-        from fldataprofier.modules.kmean import _safe_silhouette
+        from fldataprofiler.modules.kmean import _safe_silhouette
 
         # Single cluster only
         features = np.random.randn(100, 2)

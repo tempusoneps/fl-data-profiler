@@ -11,8 +11,8 @@ import numpy as np
 import pandas as pd
 
 SUPPORTED_INPUT_SUFFIXES = (".csv", ".parquet")
-_INPUT_ROW_LIMIT: ContextVar[int | None] = ContextVar("fldataprofier_input_row_limit", default=None)
-_FULL_ROW_MODE: ContextVar[bool] = ContextVar("fldataprofier_full_row_mode", default=False)
+_INPUT_ROW_LIMIT: ContextVar[int | None] = ContextVar("fldataprofiler_input_row_limit", default=None)
+_FULL_ROW_MODE: ContextVar[bool] = ContextVar("fldataprofiler_full_row_mode", default=False)
 
 
 @contextmanager

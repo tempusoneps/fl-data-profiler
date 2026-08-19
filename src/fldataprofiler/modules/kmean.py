@@ -25,10 +25,10 @@ from sklearn.metrics.cluster import contingency_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.statistics import DatasetShape
-from fldataprofier.utils import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.statistics import DatasetShape
+from fldataprofiler.utils import (
     _FULL_ROW_MODE,
     _date_columns,
     _html_markdown_details,

@@ -40,7 +40,7 @@ def make_signal_dataset(base_dir: Path, rows: int = 260) -> tuple[Path, Path]:
 
 class FeatureScoringModuleTests(unittest.TestCase):
     def test_information_coefficient_ranks_signal_feature(self) -> None:
-        from fldataprofier.modules.information_coefficient import (
+        from fldataprofiler.modules.information_coefficient import (
             InformationCoefficientModule,
         )
 
@@ -56,7 +56,7 @@ class FeatureScoringModuleTests(unittest.TestCase):
         self.assertIn(top["score_name"], {"pearson_ic", "rank_ic"})
 
     def test_permutation_importance_ts_ranks_predictive_feature(self) -> None:
-        from fldataprofier.modules.permutation_importance_ts import (
+        from fldataprofiler.modules.permutation_importance_ts import (
             PermutationImportanceTSModule,
         )
 
@@ -75,7 +75,7 @@ class FeatureScoringModuleTests(unittest.TestCase):
         self.assertGreater(float(scores.iloc[0]["mean_score"]), 0)
 
     def test_timeseries_importance_combines_component_scores(self) -> None:
-        from fldataprofier.modules.timeseries_importance import (
+        from fldataprofiler.modules.timeseries_importance import (
             TimeSeriesImportanceModule,
         )
 
@@ -97,7 +97,7 @@ class FeatureScoringModuleTests(unittest.TestCase):
         )
 
     def test_timeseries_importance_uses_tqdm_when_progress_enabled(self) -> None:
-        from fldataprofier.modules.timeseries_importance import (
+        from fldataprofiler.modules.timeseries_importance import (
             TimeSeriesImportanceModule,
         )
 
@@ -129,7 +129,7 @@ class FeatureScoringModuleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             feature_csv, label_csv = make_signal_dataset(tmp_path)
-            with patch("fldataprofier.modules.progress.tqdm", fake_tqdm):
+            with patch("fldataprofiler.modules.progress.tqdm", fake_tqdm):
                 TimeSeriesImportanceModule(
                     n_estimators=5,
                     random_state=11,
@@ -161,40 +161,40 @@ class FeatureScoringModuleTests(unittest.TestCase):
                 self.updates.append(value)
 
         module_cases = [
-            ("fldataprofier.modules.information_coefficient", "InformationCoefficientModule", {}),
+            ("fldataprofiler.modules.information_coefficient", "InformationCoefficientModule", {}),
             (
-                "fldataprofier.modules.permutation_importance_ts",
+                "fldataprofiler.modules.permutation_importance_ts",
                 "PermutationImportanceTSModule",
                 {"n_estimators": 5, "random_state": 7},
             ),
             (
-                "fldataprofier.modules.timeseries_importance",
+                "fldataprofiler.modules.timeseries_importance",
                 "TimeSeriesImportanceModule",
                 {"n_estimators": 5, "random_state": 11},
             ),
-            ("fldataprofier.modules.mutual_information", "MutualInformationModule", {}),
-            ("fldataprofier.modules.mrmr", "MRMRModule", {"max_features": 10, "random_state": 3}),
+            ("fldataprofiler.modules.mutual_information", "MutualInformationModule", {}),
+            ("fldataprofiler.modules.mrmr", "MRMRModule", {"max_features": 10, "random_state": 3}),
             (
-                "fldataprofier.modules.stability_selection",
+                "fldataprofiler.modules.stability_selection",
                 "StabilitySelectionModule",
                 {"n_resamples": 3, "random_state": 13},
             ),
             (
-                "fldataprofier.modules.regularized_linear",
+                "fldataprofiler.modules.regularized_linear",
                 "RegularizedLinearModule",
                 {"random_state": 17},
             ),
             (
-                "fldataprofier.modules.lightgbm",
+                "fldataprofiler.modules.lightgbm",
                 "LightGBMModule",
                 {"n_estimators": 5, "random_state": 19},
             ),
             (
-                "fldataprofier.modules.feature_interactions",
+                "fldataprofiler.modules.feature_interactions",
                 "FeatureInteractionsModule",
                 {"max_base_features": 4, "max_pairs": 6},
             ),
-            ("fldataprofier.modules.regime_scoring", "RegimeScoringModule", {"n_regimes": 3}),
+            ("fldataprofiler.modules.regime_scoring", "RegimeScoringModule", {"n_regimes": 3}),
         ]
 
         progress_instances: list[FakeProgress] = []
@@ -207,7 +207,7 @@ class FeatureScoringModuleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             feature_csv, label_csv = make_signal_dataset(tmp_path)
-            with patch("fldataprofier.modules.progress.tqdm", fake_tqdm):
+            with patch("fldataprofiler.modules.progress.tqdm", fake_tqdm):
                 for module_path, class_name, kwargs in module_cases:
                     with self.subTest(module=module_path):
                         module = __import__(module_path, fromlist=[class_name])
@@ -227,43 +227,43 @@ class FeatureScoringModuleTests(unittest.TestCase):
     def test_remaining_feature_selection_modules_write_scores(self) -> None:
         module_cases = [
             (
-                "fldataprofier.modules.mutual_information",
+                "fldataprofiler.modules.mutual_information",
                 "MutualInformationModule",
                 {},
                 {"feature", "label", "score_name", "score"},
             ),
             (
-                "fldataprofier.modules.mrmr",
+                "fldataprofiler.modules.mrmr",
                 "MRMRModule",
                 {"max_features": 20, "random_state": 3},
                 {"relevance", "redundancy", "mrmr_score"},
             ),
             (
-                "fldataprofier.modules.stability_selection",
+                "fldataprofiler.modules.stability_selection",
                 "StabilitySelectionModule",
                 {"n_resamples": 8, "random_state": 13},
                 {"selection_frequency"},
             ),
             (
-                "fldataprofier.modules.regularized_linear",
+                "fldataprofiler.modules.regularized_linear",
                 "RegularizedLinearModule",
                 {"random_state": 17},
                 {"coefficient", "abs_coefficient", "model_type"},
             ),
             (
-                "fldataprofier.modules.lightgbm",
+                "fldataprofiler.modules.lightgbm",
                 "LightGBMModule",
                 {"n_estimators": 10, "random_state": 19},
                 {"importance_type", "score"},
             ),
             (
-                "fldataprofier.modules.feature_interactions",
+                "fldataprofiler.modules.feature_interactions",
                 "FeatureInteractionsModule",
                 {"max_base_features": 4, "max_pairs": 12},
                 {"interaction", "left_feature", "right_feature", "operation"},
             ),
             (
-                "fldataprofier.modules.regime_scoring",
+                "fldataprofiler.modules.regime_scoring",
                 "RegimeScoringModule",
                 {"n_regimes": 3},
                 {"regime", "score_name", "mean_abs_score"},
@@ -285,7 +285,7 @@ class FeatureScoringModuleTests(unittest.TestCase):
                     self.assertTrue((result.report_dir / "summary.json").exists())
 
     def test_feature_scoring_modules_are_registered(self) -> None:
-        from fldataprofier.registry import list_modules
+        from fldataprofiler.registry import list_modules
 
         expected = {
             "timeseries_importance",

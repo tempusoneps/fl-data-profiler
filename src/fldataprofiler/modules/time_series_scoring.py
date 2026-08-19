@@ -12,8 +12,8 @@ from sklearn.feature_selection import mutual_info_classif, mutual_info_regressio
 from sklearn.metrics import accuracy_score, r2_score
 from sklearn.preprocessing import LabelEncoder
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.utils import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.utils import (
     _html_markdown_details,
     _markdown_table,
     _merge_inputs,

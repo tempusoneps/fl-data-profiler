@@ -34,7 +34,6 @@ Cú pháp lệnh tổng quát:
 ```bash
 fldataprofiler fit <feature_file> <label_file> --module <module_name> [OPTIONS]
 ```
-*(Hoặc dùng alias `fldataprofier fit ...`)*
 
 ### 3.1. Phân tích Phân cụm KMeans (`kmean` / `kmeans_gpu`)
 
