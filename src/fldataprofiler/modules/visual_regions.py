@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.statistics import DatasetShape
-from fldataprofier.utils import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.statistics import DatasetShape
+from fldataprofiler.utils import (
     _date_columns,
     _html_markdown_details,
     _markdown_table,

@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.time_series_scoring import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.time_series_scoring import (
     aggregate_scores,
     build_result,
     load_prepared_data,

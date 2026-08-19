@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import binomtest
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
@@ -18,10 +20,9 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.statistics import DatasetShape
-from fldataprofier.utils import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.statistics import DatasetShape
+from fldataprofiler.utils import (
     _date_columns,
     _html_markdown_details,
     _markdown_table,
@@ -37,14 +38,15 @@ from fldataprofier.utils import (
     _write_json,
 )
 
-MAX_ROWS = 20_000
+MAX_ROWS = 10_000
 MAX_CLASS_COUNT = 50
 RANDOM_STATE = 42
-TIME_BUDGET_SECONDS = 60  # Default time budget per target
+BORUTA_ITERATIONS = 30
+P_VALUE = 0.05
 
 
 @dataclass(frozen=True)
-class AutoGluonRunMetadata:
+class BorutaRunMetadata:
     module: str
     created_at: str
     feature_csv: str
@@ -57,14 +59,12 @@ class AutoGluonRunMetadata:
     features: list[str]
     targets: list[str]
     ignored_columns: list[str]
-    time_budget: int
+    iterations: int
+    p_value: float
 
 
-class AutoGluonRelationshipsModule:
-    name = "autogluon"
-
-    def __init__(self, progress: bool | None = None) -> None:
-        self.progress = progress
+class BorutaRelationshipsModule:
+    name = "boruta"
 
     def run(
         self,
@@ -74,13 +74,6 @@ class AutoGluonRelationshipsModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
-        import importlib.util
-
-        if importlib.util.find_spec("autogluon.tabular") is None:
-            raise ImportError(
-                "AutoGluon is not installed. Please run `uv pip install autogluon` or `pip install autogluon` to install it."
-            )
-
         features = _read_table_with_date_index(feature_csv)
         labels = _read_table_with_date_index(label_csv)
         merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -96,26 +89,16 @@ class AutoGluonRelationshipsModule:
         model_frame = _sample_rows(
             merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
         )
+        model_results, selections = _fit_target_models(
+            model_frame,
+            numeric_features,
+            selected_targets,
+        )
 
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with ModuleProgress(
-                self.name, total=len(selected_targets), enabled=self.progress
-            ) as progress_bar:
-                model_results, importances = _fit_target_models(
-                    model_frame,
-                    numeric_features,
-                    selected_targets,
-                    run_dir,
-                    progress_bar,
-                )
-
-        metadata = AutoGluonRunMetadata(
+        metadata = BorutaRunMetadata(
             module=self.name,
             created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
@@ -128,7 +111,8 @@ class AutoGluonRelationshipsModule:
             features=numeric_features,
             targets=selected_targets,
             ignored_columns=ignored_columns,
-            time_budget=TIME_BUDGET_SECONDS,
+            iterations=BORUTA_ITERATIONS,
+            p_value=P_VALUE,
         )
 
         artifacts = [
@@ -137,37 +121,33 @@ class AutoGluonRelationshipsModule:
                 {
                     "metadata": asdict(metadata),
                     "model_results": model_results.to_dict(orient="records"),
-                    "top_feature_importance": importances.head(100).to_dict(orient="records"),
+                    "top_selected_features": selections.head(100).to_dict(orient="records"),
                 },
             ),
             _write_csv(run_dir / "scores.csv", model_results),
-            _write_csv(run_dir / "importance.csv", importances),
+            _write_csv(run_dir / "boruta_features.csv", selections),
         ]
 
-        markdown = _render_markdown(metadata, model_results, importances)
+        markdown = _render_markdown(metadata, model_results, selections)
         md_path = run_dir / "report.md"
         md_path.write_text(markdown, encoding="utf-8")
         artifacts.append(md_path)
 
         html_path = run_dir / "report.html"
-        html_path.write_text(_render_html(markdown, model_results, importances), encoding="utf-8")
+        html_path.write_text(_render_html(markdown, model_results, selections), encoding="utf-8")
         artifacts.append(html_path)
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
 
 
 def _fit_target_models(
-    merged: pd.DataFrame,
-    feature_columns: list[str],
-    label_columns: list[str],
-    run_dir: Path,
-    progress_bar: ModuleProgress | None = None,
+    merged: pd.DataFrame, feature_columns: list[str], label_columns: list[str]
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     result_rows: list[dict[str, object]] = []
-    importance_rows: list[dict[str, object]] = []
+    selection_rows: list[dict[str, object]] = []
 
     if not feature_columns:
-        return _model_results_frame(result_rows), _importance_frame(importance_rows)
+        return _model_results_frame(result_rows), _selection_frame(selection_rows)
 
     x = merged[feature_columns].apply(_numeric_series)
 
@@ -178,91 +158,48 @@ def _fit_target_models(
             y_numeric.notna().sum() >= 10 and y_numeric.nunique(dropna=True) > MAX_CLASS_COUNT
         )
         if is_numeric_target:
-            result, importance = _fit_regression(label, x, y_numeric, run_dir)
+            result, selections = _fit_regression(label, x, y_numeric)
         else:
-            result, importance = _fit_classification(label, x, y_raw, run_dir)
+            result, selections = _fit_classification(label, x, y_raw)
 
         if result is not None:
             result_rows.append(result)
-        importance_rows.extend(importance)
+        selection_rows.extend(selections)
 
-        if progress_bar is not None:
-            progress_bar.step(label)
-
-    return _model_results_frame(result_rows), _importance_frame(importance_rows)
+    return _model_results_frame(result_rows), _selection_frame(selection_rows)
 
 
 def _fit_regression(
-    label: str, features: pd.DataFrame, target: pd.Series, run_dir: Path
+    label: str, features: pd.DataFrame, target: pd.Series
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
-    from autogluon.tabular import TabularPredictor
-
     frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
     if len(frame) < 30 or frame[label].nunique() < 2:
         return None, []
 
+    x = frame[features.columns]
+    y = frame[label]
     x_train, x_test, y_train, y_test = train_test_split(
-        frame[features.columns],
-        frame[label],
-        test_size=0.2,
+        x, y, test_size=0.2, random_state=RANDOM_STATE
+    )
+    model = RandomForestRegressor(
+        n_estimators=300,
+        max_depth=None,
+        min_samples_leaf=2,
+        n_jobs=-1,
         random_state=RANDOM_STATE,
     )
-
-    train_data = pd.concat([x_train, y_train], axis=1)
-    test_data = pd.concat([x_test, y_test], axis=1)
-
-    model_dir = run_dir / f"ag_models_{label}"
-    if model_dir.exists():
-        shutil.rmtree(model_dir)
-
-    predictor = TabularPredictor(
-        label=label,
-        problem_type="regression",
-        eval_metric="r2",
-        path=str(model_dir),
-    )
-    predictor.fit(
-        train_data,
-        time_limit=TIME_BUDGET_SECONDS,
-        presets="medium_quality_faster_train",
-        verbosity=0,
-    )
-
-    predictions = predictor.predict(x_test)
+    imputer = SimpleImputer(strategy="median")
+    x_train_imputed = pd.DataFrame(imputer.fit_transform(x_train), columns=x.columns)
+    x_test_imputed = pd.DataFrame(imputer.transform(x_test), columns=x.columns)
+    model.fit(x_train_imputed, y_train)
+    predictions = model.predict(x_test_imputed)
+    selections = _boruta_select(label, "regression", x, y)
     rmse = float(np.sqrt(mean_squared_error(y_test, predictions)))
-
-    best_model = predictor.get_model_best()
-
-    # Feature importance via fast permutation or native (if supported)
-    # We use predictor.feature_importance with a subset to save time if features is very large
-    try:
-        imp_df = predictor.feature_importance(test_data, num_shuffle_sets=1)
-        importances_map = imp_df["importance"].to_dict()
-    except Exception:
-        importances_map = {}
-
-    importance = [
-        {
-            "label": label,
-            "feature": col,
-            "importance": _round(importances_map.get(col, 0.0)),
-            "importance_name": "autogluon_permutation_importance",
-        }
-        for col in features.columns
-    ]
-    importance = sorted(importance, key=lambda row: row["importance"] or 0, reverse=True)
-
-    # Clean up the model directory after training to save space, but keeping leaderboard info
-    try:
-        shutil.rmtree(model_dir)
-    except Exception:
-        pass
-
     return (
         {
             "label": label,
             "task": "regression",
-            "model": f"AutoGluon_{best_model}",
+            "model": "RandomForestRegressor + Boruta shadow features",
             "samples": len(frame),
             "features": len(features.columns),
             "score_primary": _round(float(r2_score(y_test, predictions))),
@@ -272,88 +209,51 @@ def _fit_regression(
             "accuracy": None,
             "balanced_accuracy": None,
             "f1_weighted": None,
-            "note": f"best_model={best_model}",
+            "note": "",
         },
-        importance,
+        selections,
     )
 
 
 def _fit_classification(
-    label: str, features: pd.DataFrame, target: pd.Series, run_dir: Path
+    label: str, features: pd.DataFrame, target: pd.Series
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
-    from autogluon.tabular import TabularPredictor
-
     frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
     class_count = int(frame[label].nunique(dropna=True))
     if len(frame) < 30 or class_count < 2 or class_count > MAX_CLASS_COUNT:
         return None, []
 
     encoder = LabelEncoder()
-    # Map target classes to strings to ensure autogluon handles them cleanly as categorical
-    y_encoded = encoder.fit_transform(frame[label].astype(str))
-    class_sizes = np.bincount(y_encoded)
-    if np.min(class_sizes) < 2:
+    y = encoder.fit_transform(frame[label].astype(str))
+    if np.min(np.bincount(y)) < 2:
         return None, []
 
     x_train, x_test, y_train, y_test = train_test_split(
         frame[features.columns],
-        y_encoded,
+        y,
         test_size=0.2,
         random_state=RANDOM_STATE,
-        stratify=y_encoded,
+        stratify=y,
     )
-
-    train_data = pd.concat([x_train, pd.Series(y_train, name=label)], axis=1)
-    test_data = pd.concat([x_test, pd.Series(y_test, name=label)], axis=1)
-
-    model_dir = run_dir / f"ag_models_{label}"
-    if model_dir.exists():
-        shutil.rmtree(model_dir)
-
-    problem_type = "binary" if class_count == 2 else "multiclass"
-    predictor = TabularPredictor(
-        label=label,
-        problem_type=problem_type,
-        eval_metric="accuracy",
-        path=str(model_dir),
+    model = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=None,
+        min_samples_leaf=2,
+        class_weight="balanced",
+        n_jobs=-1,
+        random_state=RANDOM_STATE,
     )
-    predictor.fit(
-        train_data,
-        time_limit=TIME_BUDGET_SECONDS,
-        presets="medium_quality_faster_train",
-        verbosity=0,
-    )
-
-    predictions = predictor.predict(x_test)
-    best_model = predictor.get_model_best()
-
-    try:
-        imp_df = predictor.feature_importance(test_data, num_shuffle_sets=1)
-        importances_map = imp_df["importance"].to_dict()
-    except Exception:
-        importances_map = {}
-
-    importance = [
-        {
-            "label": label,
-            "feature": col,
-            "importance": _round(importances_map.get(col, 0.0)),
-            "importance_name": "autogluon_permutation_importance",
-        }
-        for col in features.columns
-    ]
-    importance = sorted(importance, key=lambda row: row["importance"] or 0, reverse=True)
-
-    try:
-        shutil.rmtree(model_dir)
-    except Exception:
-        pass
-
+    imputer = SimpleImputer(strategy="median")
+    x_train_imputed = pd.DataFrame(imputer.fit_transform(x_train), columns=features.columns)
+    x_test_imputed = pd.DataFrame(imputer.transform(x_test), columns=features.columns)
+    model.fit(x_train_imputed, y_train)
+    predictions = model.predict(x_test_imputed)
+    selections = _boruta_select(label, "classification", frame[features.columns], y)
     return (
         {
             "label": label,
             "task": "classification",
-            "model": f"AutoGluon_{best_model}",
+            "model": "RandomForestClassifier + Boruta shadow features",
             "samples": len(frame),
             "features": len(features.columns),
             "score_primary": _round(float(balanced_accuracy_score(y_test, predictions))),
@@ -363,39 +263,126 @@ def _fit_classification(
             "accuracy": _round(float(accuracy_score(y_test, predictions))),
             "balanced_accuracy": _round(float(balanced_accuracy_score(y_test, predictions))),
             "f1_weighted": _round(float(f1_score(y_test, predictions, average="weighted"))),
-            "note": f"classes={class_count}, best_model={best_model}",
+            "note": f"classes={class_count}",
         },
-        importance,
+        selections,
     )
 
 
-def _importance_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
-    columns = ["label", "feature", "importance", "importance_name"]
+def _boruta_select(
+    label: str, task: str, features: pd.DataFrame, target: pd.Series | np.ndarray
+) -> list[dict[str, object]]:
+    rng = np.random.default_rng(RANDOM_STATE)
+    imputer = SimpleImputer(strategy="median")
+    x = pd.DataFrame(imputer.fit_transform(features), columns=features.columns)
+    hit_counts = np.zeros(len(features.columns), dtype=int)
+    mean_importance = np.zeros(len(features.columns), dtype=float)
+    mean_shadow_threshold = 0.0
+
+    for iteration in range(BORUTA_ITERATIONS):
+        shadow = x.apply(lambda column: rng.permutation(column.to_numpy()))
+        shadow.columns = [f"shadow_{column}" for column in x.columns]
+        train_x = pd.concat([x, shadow], axis=1)
+        model = _boruta_forest(task, iteration)
+        model.fit(train_x, target)
+        importances = np.asarray(model.feature_importances_, dtype=float)
+        real_importances = importances[: len(features.columns)]
+        shadow_threshold = float(np.max(importances[len(features.columns) :]))
+        hit_counts += real_importances > shadow_threshold
+        mean_importance += real_importances
+        mean_shadow_threshold += shadow_threshold
+
+    mean_importance /= BORUTA_ITERATIONS
+    mean_shadow_threshold /= BORUTA_ITERATIONS
+
+    rows = []
+    for feature, hits, importance in zip(
+        features.columns, hit_counts, mean_importance, strict=False
+    ):
+        accepted_p = binomtest(int(hits), BORUTA_ITERATIONS, 0.5, alternative="greater").pvalue
+        rejected_p = binomtest(int(hits), BORUTA_ITERATIONS, 0.5, alternative="less").pvalue
+        if accepted_p < P_VALUE:
+            decision = "confirmed"
+        elif rejected_p < P_VALUE:
+            decision = "rejected"
+        else:
+            decision = "tentative"
+        rows.append(
+            {
+                "label": label,
+                "task": task,
+                "feature": str(feature),
+                "decision": decision,
+                "hits": int(hits),
+                "iterations": BORUTA_ITERATIONS,
+                "hit_rate": _round(float(hits / BORUTA_ITERATIONS)),
+                "mean_importance": _round(float(importance)),
+                "mean_shadow_threshold": _round(mean_shadow_threshold),
+                "accepted_p_value": _round(float(accepted_p)),
+                "rejected_p_value": _round(float(rejected_p)),
+            }
+        )
+    return sorted(rows, key=lambda row: (row["decision"] != "confirmed", -(row["hit_rate"] or 0)))
+
+
+def _boruta_forest(task: str, iteration: int) -> RandomForestClassifier | RandomForestRegressor:
+    params = {
+        "n_estimators": 200,
+        "max_depth": None,
+        "min_samples_leaf": 2,
+        "n_jobs": -1,
+        "random_state": RANDOM_STATE + iteration,
+    }
+    if task == "classification":
+        return RandomForestClassifier(class_weight="balanced", **params)
+    return RandomForestRegressor(**params)
+
+
+def _selection_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
+    columns = [
+        "label",
+        "task",
+        "feature",
+        "decision",
+        "hits",
+        "iterations",
+        "hit_rate",
+        "mean_importance",
+        "mean_shadow_threshold",
+        "accepted_p_value",
+        "rejected_p_value",
+    ]
     frame = pd.DataFrame(rows, columns=columns)
     if frame.empty:
         return frame
-    return frame.sort_values(
-        ["label", "importance"],
-        ascending=[True, False],
-        na_position="last",
-    ).reset_index(drop=True)
+    decision_rank = {"confirmed": 0, "tentative": 1, "rejected": 2}
+    return (
+        frame.assign(_decision_rank=frame["decision"].map(decision_rank))
+        .sort_values(
+            ["label", "_decision_rank", "hit_rate", "mean_importance"],
+            ascending=[True, True, False, False],
+            na_position="last",
+        )
+        .drop(columns=["_decision_rank"])
+        .reset_index(drop=True)
+    )
 
 
 def _render_markdown(
-    metadata: AutoGluonRunMetadata, model_results: pd.DataFrame, importances: pd.DataFrame
+    metadata: BorutaRunMetadata, model_results: pd.DataFrame, selections: pd.DataFrame
 ) -> str:
     scores = (
         _markdown_table(model_results)
         if not model_results.empty
-        else "No AutoGluon models were available."
+        else "No Boruta models were available."
     )
-    top_importance = (
-        _markdown_table(importances.groupby("label", group_keys=False).head(10))
-        if not importances.empty
-        else "No feature importance was available."
+    top_features = (
+        _markdown_table(selections.groupby("label", group_keys=False).head(15))
+        if not selections.empty
+        else "No Boruta feature decisions were available."
     )
     ignored = ", ".join(metadata.ignored_columns) if metadata.ignored_columns else "none"
-    return f"""# AutoGluon AutoML Feature/Label Relationship Report
+    return f"""# Boruta Feature Selection Report
 
 ## Run
 
@@ -408,43 +395,44 @@ def _render_markdown(
 - Label shape: {metadata.label_shape.rows} rows x {metadata.label_shape.columns} columns
 - Merged shape: {metadata.merged_shape.rows} rows x {metadata.merged_shape.columns} columns
 - Model rows: {metadata.model_rows}
+- Iterations: {metadata.iterations}
+- P-value threshold: {metadata.p_value}
 - Ignored columns: {ignored}
 - Numeric features: {len(metadata.features)}
 - Targets: {", ".join(metadata.targets)}
-- Time budget per target: {metadata.time_budget} seconds
 
 ## Model Scores
 
 {scores}
 
-## Top Feature Importance
+## Feature Decisions
 
-{top_importance}
+{top_features}
 
 ## Artifacts
 
 - `summary.json`
 - `scores.csv`
-- `importance.csv`
+- `boruta_features.csv`
 """
 
 
-def _render_html(markdown: str, model_results: pd.DataFrame, importances: pd.DataFrame) -> str:
+def _render_html(markdown: str, model_results: pd.DataFrame, selections: pd.DataFrame) -> str:
     scores = (
         model_results.to_html(index=False, classes="data-table") if not model_results.empty else ""
     )
-    top_importance = (
-        importances.groupby("label", group_keys=False)
-        .head(20)
+    top_features = (
+        selections.groupby("label", group_keys=False)
+        .head(30)
         .to_html(index=False, classes="data-table")
-        if not importances.empty
+        if not selections.empty
         else ""
     )
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>AutoGluon AutoML Feature/Label Relationship Report</title>
+  <title>Boruta Feature Selection Report</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 32px; color: #1f2933; }}
     pre {{ white-space: pre-wrap; background: #f5f7fa; padding: 16px; border-radius: 6px; }}
@@ -457,8 +445,8 @@ def _render_html(markdown: str, model_results: pd.DataFrame, importances: pd.Dat
   {_html_markdown_details(markdown)}
   <h2>Model Scores</h2>
   {scores}
-  <h2>Top Feature Importance</h2>
-  {top_importance}
+  <h2>Feature Decisions</h2>
+  {top_features}
 </body>
 </html>
 """

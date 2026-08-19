@@ -4,8 +4,8 @@
 
 `fl-data-profiling` is a Python 3.12 package for profiling relationships and predictive power between feature datasets (`feature.parquet` / `feature.csv`) and label datasets (`label.csv` / `label.parquet`). 
 
-Source code lives in `fldataprofier/`:
-- `cli.py`: provides the CLI entry point (`fldataprofiler` / `fldataprofier`).
+Source code lives in `src/fldataprofiler/`:
+- `cli.py`: provides the CLI entry point (`fldataprofiler`).
 - `registry.py`: manages registration, lookup, and aliasing of all profiling modules.
 - `utils.py`: common data loading (`.csv`, `.parquet`), datetime indexing, merging, type casting, markdown/HTML rendering, and row limit/full mode context managers.
 - `modules/`: contains 25 profiling modules implementing `ProfilingModule` interface (`run(feature_csv, label_csv, output_dir, join_key, targets) -> ModuleResult`).

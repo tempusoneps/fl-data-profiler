@@ -10,7 +10,7 @@ import pandas as pd
 
 class VisualRegionsHelperTests(unittest.TestCase):
     def test_preparation_excludes_invalid_features_and_converts_numeric_strings(self) -> None:
-        from fldataprofier.modules.visual_regions import _prepare_numeric_feature_frame
+        from fldataprofiler.modules.visual_regions import _prepare_numeric_feature_frame
 
         frame = pd.DataFrame(
             {
@@ -42,7 +42,7 @@ class VisualRegionsHelperTests(unittest.TestCase):
         )
 
     def test_categorical_label_detection_uses_cardinality_bounds(self) -> None:
-        from fldataprofier.modules.visual_regions import _categorical_label_columns
+        from fldataprofiler.modules.visual_regions import _categorical_label_columns
 
         frame = pd.DataFrame(
             {
@@ -57,7 +57,7 @@ class VisualRegionsHelperTests(unittest.TestCase):
         )
 
     def test_quantile_bins_are_uint8_and_reuse_feature_names(self) -> None:
-        from fldataprofier.modules.visual_regions import _quantile_bin_features
+        from fldataprofiler.modules.visual_regions import _quantile_bin_features
 
         features = pd.DataFrame(
             {
@@ -73,7 +73,7 @@ class VisualRegionsHelperTests(unittest.TestCase):
         self.assertLessEqual(int(binned.max().max()), 4)
 
     def test_candidate_selection_keeps_top_and_deterministic_sample(self) -> None:
-        from fldataprofier.modules.visual_regions import _select_candidate_features
+        from fldataprofiler.modules.visual_regions import _select_candidate_features
 
         scores = pd.DataFrame(
             {
@@ -97,7 +97,7 @@ class VisualRegionsHelperTests(unittest.TestCase):
         )
 
     def test_evaluate_2d_grid_purity(self) -> None:
-        from fldataprofier.modules.visual_regions import _evaluate_2d_grid_purity
+        from fldataprofiler.modules.visual_regions import _evaluate_2d_grid_purity
 
         df = pd.DataFrame(
             {
@@ -116,7 +116,7 @@ class VisualRegionsHelperTests(unittest.TestCase):
         self.assertEqual(len(result), 2)
 
     def test_merge_contiguous_regions(self) -> None:
-        from fldataprofier.modules.visual_regions import _merge_contiguous_regions
+        from fldataprofiler.modules.visual_regions import _merge_contiguous_regions
 
         grid_cells = pd.DataFrame(
             {
@@ -137,7 +137,7 @@ class VisualRegionsHelperTests(unittest.TestCase):
         self.assertGreater(len(merged), 0)
 
     def test_extract_2d_rules(self) -> None:
-        from fldataprofier.modules.visual_regions import _extract_2d_rules
+        from fldataprofiler.modules.visual_regions import _extract_2d_rules
 
         df = pd.DataFrame(
             {
@@ -155,7 +155,7 @@ class VisualRegionsHelperTests(unittest.TestCase):
 
 class VisualRegionsModuleTests(unittest.TestCase):
     def test_run_creates_expected_artifacts(self) -> None:
-        from fldataprofier.modules.visual_regions import VisualRegionsModule
+        from fldataprofiler.modules.visual_regions import VisualRegionsModule
 
         feature_df = pd.DataFrame(
             {
@@ -191,8 +191,8 @@ class VisualRegionsModuleTests(unittest.TestCase):
             self.assertIn("report.html", artifact_names)
 
     def test_registry_integration(self) -> None:
-        from fldataprofier.modules.visual_regions import VisualRegionsModule
-        from fldataprofier.registry import get_module, list_modules
+        from fldataprofiler.modules.visual_regions import VisualRegionsModule
+        from fldataprofiler.registry import get_module, list_modules
 
         self.assertIn("visual_regions", list_modules())
         module = get_module("visual_regions")

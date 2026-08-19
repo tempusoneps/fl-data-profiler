@@ -10,7 +10,7 @@ import pandas as pd
 
 class XGBoostTests(unittest.TestCase):
     def test_progress_tracks_every_target_model(self) -> None:
-        from fldataprofier.modules.xgboost import XGBoostRelationshipsModule
+        from fldataprofiler.modules.xgboost import XGBoostRelationshipsModule
 
         class FakeProgress:
             def __init__(self, *args, **kwargs) -> None:
@@ -83,9 +83,9 @@ class XGBoostTests(unittest.TestCase):
             labels.to_csv(label_csv, index=False)
 
             with (
-                patch("fldataprofier.modules.progress.tqdm", fake_tqdm),
+                patch("fldataprofiler.modules.progress.tqdm", fake_tqdm),
                 patch(
-                    "fldataprofier.modules.xgboost._fit_classification",
+                    "fldataprofiler.modules.xgboost._fit_classification",
                     fake_classification,
                 ),
             ):
@@ -102,7 +102,7 @@ class XGBoostTests(unittest.TestCase):
         self.assertEqual(["label_a", "label_b"], progress_instances[0].postfixes)
 
     def test_categorical_and_numeric_features_passed(self) -> None:
-        from fldataprofier.modules.xgboost import XGBoostRelationshipsModule
+        from fldataprofiler.modules.xgboost import XGBoostRelationshipsModule
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

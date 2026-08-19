@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from fldataprofier.registry import get_module, list_modules
-from fldataprofier.utils import (
+from fldataprofiler.registry import get_module, list_modules
+from fldataprofiler.utils import (
     _full_row_mode,
     _input_row_limit,
     _is_supported_input_path,
@@ -14,7 +14,7 @@ from fldataprofier.utils import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="fldataprofier",
+        prog="fldataprofiler",
         description="Create reports that profile relationships between feature.csv and label.csv.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

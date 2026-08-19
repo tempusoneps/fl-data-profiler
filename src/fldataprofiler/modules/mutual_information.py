@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.time_series_scoring import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.time_series_scoring import (
     build_result,
     load_prepared_data,
     mutual_information_scores,
 )
-from fldataprofier.utils import _write_csv
+from fldataprofiler.utils import _write_csv
 
 
 class MutualInformationModule:

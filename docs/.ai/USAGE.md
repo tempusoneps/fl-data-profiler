@@ -2,7 +2,7 @@
 
 ## 1. Using the Command Line Interface (CLI)
 
-After installing, `fldataprofiler` (or alias `fldataprofier`) is available in your shell:
+After installing, `fldataprofiler` is available in your shell:
 
 ### Basic Profiling Command
 ```bash
@@ -44,7 +44,7 @@ You can also run modules programmatically in Python:
 
 ```python
 from pathlib import Path
-from fldataprofier.registry import get_module
+from fldataprofiler.registry import get_module
 
 # 1. Instantiate module
 module = get_module("alphalens")

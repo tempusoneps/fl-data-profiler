@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.time_series_scoring import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.time_series_scoring import (
     aggregate_scores,
     build_result,
     information_coefficient_rows,
     load_prepared_data,
 )
-from fldataprofier.utils import _numeric_series, _write_csv
+from fldataprofiler.utils import _numeric_series, _write_csv
 
 
 class RegimeScoringModule:

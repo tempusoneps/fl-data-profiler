@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.time_series_scoring import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.time_series_scoring import (
     build_result,
     information_coefficient_rows,
     load_prepared_data,
     permutation_importance_rows,
 )
-from fldataprofier.utils import _write_csv
+from fldataprofiler.utils import _write_csv
 
 
 class TimeSeriesImportanceModule:

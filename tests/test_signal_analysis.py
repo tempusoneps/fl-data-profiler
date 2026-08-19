@@ -9,7 +9,7 @@ import pandas as pd
 
 class SignalAnalysisTests(unittest.TestCase):
     def test_signal_analysis_runs_successfully(self) -> None:
-        from fldataprofier.modules.signal_analysis import SignalAnalysisModule
+        from fldataprofiler.modules.signal_analysis import SignalAnalysisModule
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

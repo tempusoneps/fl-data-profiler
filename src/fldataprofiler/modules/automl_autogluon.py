@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,10 +18,10 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.statistics import DatasetShape
-from fldataprofier.utils import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.statistics import DatasetShape
+from fldataprofiler.utils import (
     _date_columns,
     _html_markdown_details,
     _markdown_table,
@@ -43,7 +44,7 @@ TIME_BUDGET_SECONDS = 60  # Default time budget per target
 
 
 @dataclass(frozen=True)
-class PyCaretRunMetadata:
+class AutoGluonRunMetadata:
     module: str
     created_at: str
     feature_csv: str
@@ -59,8 +60,8 @@ class PyCaretRunMetadata:
     time_budget: int
 
 
-class PyCaretRelationshipsModule:
-    name = "pycaret"
+class AutoGluonRelationshipsModule:
+    name = "autogluon"
 
     def __init__(self, progress: bool | None = None) -> None:
         self.progress = progress
@@ -75,9 +76,9 @@ class PyCaretRelationshipsModule:
     ) -> ModuleResult:
         import importlib.util
 
-        if importlib.util.find_spec("pycaret") is None:
+        if importlib.util.find_spec("autogluon.tabular") is None:
             raise ImportError(
-                "PyCaret is not installed. Please run `uv pip install pycaret` or `pip install pycaret` to install it."
+                "AutoGluon is not installed. Please run `uv pip install autogluon` or `pip install autogluon` to install it."
             )
 
         features = _read_table_with_date_index(feature_csv)
@@ -96,6 +97,9 @@ class PyCaretRelationshipsModule:
             merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
         )
 
+        run_dir = output_dir / self.name
+        run_dir.mkdir(parents=True, exist_ok=True)
+
         import warnings
 
         with warnings.catch_warnings():
@@ -107,13 +111,11 @@ class PyCaretRelationshipsModule:
                     model_frame,
                     numeric_features,
                     selected_targets,
+                    run_dir,
                     progress_bar,
                 )
 
-        run_dir = output_dir / self.name
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        metadata = PyCaretRunMetadata(
+        metadata = AutoGluonRunMetadata(
             module=self.name,
             created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
@@ -158,6 +160,7 @@ def _fit_target_models(
     merged: pd.DataFrame,
     feature_columns: list[str],
     label_columns: list[str],
+    run_dir: Path,
     progress_bar: ModuleProgress | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     result_rows: list[dict[str, object]] = []
@@ -175,9 +178,9 @@ def _fit_target_models(
             y_numeric.notna().sum() >= 10 and y_numeric.nunique(dropna=True) > MAX_CLASS_COUNT
         )
         if is_numeric_target:
-            result, importance = _fit_regression(label, x, y_numeric)
+            result, importance = _fit_regression(label, x, y_numeric, run_dir)
         else:
-            result, importance = _fit_classification(label, x, y_raw)
+            result, importance = _fit_classification(label, x, y_raw, run_dir)
 
         if result is not None:
             result_rows.append(result)
@@ -190,9 +193,9 @@ def _fit_target_models(
 
 
 def _fit_regression(
-    label: str, features: pd.DataFrame, target: pd.Series
+    label: str, features: pd.DataFrame, target: pd.Series, run_dir: Path
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
-    from pycaret.regression import compare_models, predict_model, setup
+    from autogluon.tabular import TabularPredictor
 
     frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
     if len(frame) < 30 or frame[label].nunique() < 2:
@@ -206,59 +209,60 @@ def _fit_regression(
     )
 
     train_data = pd.concat([x_train, y_train], axis=1)
+    test_data = pd.concat([x_test, y_test], axis=1)
 
-    # Initialize PyCaret setup
-    setup(
-        data=train_data,
-        target=label,
-        session_id=RANDOM_STATE,
-        verbose=False,
-        html=False,
+    model_dir = run_dir / f"ag_models_{label}"
+    if model_dir.exists():
+        shutil.rmtree(model_dir)
+
+    predictor = TabularPredictor(
+        label=label,
+        problem_type="regression",
+        eval_metric="r2",
+        path=str(model_dir),
+    )
+    predictor.fit(
+        train_data,
+        time_limit=TIME_BUDGET_SECONDS,
+        presets="medium_quality_faster_train",
+        verbosity=0,
     )
 
-    # Compare models with a time budget
-    best_model = compare_models(budget_time=TIME_BUDGET_SECONDS, verbose=False)
-    if best_model is None:
-        return None, []
-
-    # Evaluate on holdout/test set
-    preds_df = predict_model(best_model, data=x_test)
-    # PyCaret regression output typically adds a 'prediction_label' column
-    predictions = preds_df["prediction_label"].values
-
+    predictions = predictor.predict(x_test)
     rmse = float(np.sqrt(mean_squared_error(y_test, predictions)))
 
-    # Extract feature importance dynamically
-    feature_imp_vals = None
+    best_model = predictor.get_model_best()
+
+    # Feature importance via fast permutation or native (if supported)
+    # We use predictor.feature_importance with a subset to save time if features is very large
     try:
-        # Check standard properties
-        if (
-            hasattr(best_model, "feature_importances_")
-            and best_model.feature_importances_ is not None
-        ):
-            feature_imp_vals = best_model.feature_importances_
-        elif hasattr(best_model, "coef_") and best_model.coef_ is not None:
-            feature_imp_vals = np.abs(best_model.coef_)
-        elif hasattr(best_model, "named_steps") and "model" in best_model.named_steps:
-            inner_model = best_model.named_steps["model"]
-            if hasattr(inner_model, "feature_importances_"):
-                feature_imp_vals = inner_model.feature_importances_
-            elif hasattr(inner_model, "coef_"):
-                feature_imp_vals = np.abs(inner_model.coef_)
+        imp_df = predictor.feature_importance(test_data, num_shuffle_sets=1)
+        importances_map = imp_df["importance"].to_dict()
+    except Exception:
+        importances_map = {}
+
+    importance = [
+        {
+            "label": label,
+            "feature": col,
+            "importance": _round(importances_map.get(col, 0.0)),
+            "importance_name": "autogluon_permutation_importance",
+        }
+        for col in features.columns
+    ]
+    importance = sorted(importance, key=lambda row: row["importance"] or 0, reverse=True)
+
+    # Clean up the model directory after training to save space, but keeping leaderboard info
+    try:
+        shutil.rmtree(model_dir)
     except Exception:
         pass
-
-    if feature_imp_vals is None or len(feature_imp_vals) != len(features.columns):
-        feature_imp_vals = np.zeros(len(features.columns))
-
-    importance = _feature_importance(label, features.columns, feature_imp_vals)
-    model_name = type(best_model).__name__
 
     return (
         {
             "label": label,
             "task": "regression",
-            "model": f"PyCaret_{model_name}",
+            "model": f"AutoGluon_{best_model}",
             "samples": len(frame),
             "features": len(features.columns),
             "score_primary": _round(float(r2_score(y_test, predictions))),
@@ -268,16 +272,16 @@ def _fit_regression(
             "accuracy": None,
             "balanced_accuracy": None,
             "f1_weighted": None,
-            "note": "",
+            "note": f"best_model={best_model}",
         },
         importance,
     )
 
 
 def _fit_classification(
-    label: str, features: pd.DataFrame, target: pd.Series
+    label: str, features: pd.DataFrame, target: pd.Series, run_dir: Path
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
-    from pycaret.classification import compare_models, predict_model, setup
+    from autogluon.tabular import TabularPredictor
 
     frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
     class_count = int(frame[label].nunique(dropna=True))
@@ -285,7 +289,7 @@ def _fit_classification(
         return None, []
 
     encoder = LabelEncoder()
-    # PyCaret can handle string/categorical target, but mapping to encoded is safer
+    # Map target classes to strings to ensure autogluon handles them cleanly as categorical
     y_encoded = encoder.fit_transform(frame[label].astype(str))
     class_sizes = np.bincount(y_encoded)
     if np.min(class_sizes) < 2:
@@ -300,57 +304,56 @@ def _fit_classification(
     )
 
     train_data = pd.concat([x_train, pd.Series(y_train, name=label)], axis=1)
+    test_data = pd.concat([x_test, pd.Series(y_test, name=label)], axis=1)
 
-    # Initialize PyCaret setup
-    setup(
-        data=train_data,
-        target=label,
-        session_id=RANDOM_STATE,
-        verbose=False,
-        html=False,
+    model_dir = run_dir / f"ag_models_{label}"
+    if model_dir.exists():
+        shutil.rmtree(model_dir)
+
+    problem_type = "binary" if class_count == 2 else "multiclass"
+    predictor = TabularPredictor(
+        label=label,
+        problem_type=problem_type,
+        eval_metric="accuracy",
+        path=str(model_dir),
+    )
+    predictor.fit(
+        train_data,
+        time_limit=TIME_BUDGET_SECONDS,
+        presets="medium_quality_faster_train",
+        verbosity=0,
     )
 
-    # Compare models with a time budget
-    best_model = compare_models(budget_time=TIME_BUDGET_SECONDS, verbose=False)
-    if best_model is None:
-        return None, []
+    predictions = predictor.predict(x_test)
+    best_model = predictor.get_model_best()
 
-    # Evaluate on test set
-    preds_df = predict_model(best_model, data=x_test)
-    # PyCaret classification output typically adds 'prediction_label' column
-    predictions = preds_df["prediction_label"].values
-
-    # Extract feature importance dynamically
-    feature_imp_vals = None
     try:
-        # Check standard properties
-        if (
-            hasattr(best_model, "feature_importances_")
-            and best_model.feature_importances_ is not None
-        ):
-            feature_imp_vals = best_model.feature_importances_
-        elif hasattr(best_model, "coef_") and best_model.coef_ is not None:
-            feature_imp_vals = np.abs(best_model.coef_)
-        elif hasattr(best_model, "named_steps") and "model" in best_model.named_steps:
-            inner_model = best_model.named_steps["model"]
-            if hasattr(inner_model, "feature_importances_"):
-                feature_imp_vals = inner_model.feature_importances_
-            elif hasattr(inner_model, "coef_"):
-                feature_imp_vals = np.abs(inner_model.coef_)
+        imp_df = predictor.feature_importance(test_data, num_shuffle_sets=1)
+        importances_map = imp_df["importance"].to_dict()
+    except Exception:
+        importances_map = {}
+
+    importance = [
+        {
+            "label": label,
+            "feature": col,
+            "importance": _round(importances_map.get(col, 0.0)),
+            "importance_name": "autogluon_permutation_importance",
+        }
+        for col in features.columns
+    ]
+    importance = sorted(importance, key=lambda row: row["importance"] or 0, reverse=True)
+
+    try:
+        shutil.rmtree(model_dir)
     except Exception:
         pass
-
-    if feature_imp_vals is None or len(feature_imp_vals) != len(features.columns):
-        feature_imp_vals = np.zeros(len(features.columns))
-
-    importance = _feature_importance(label, features.columns, feature_imp_vals)
-    model_name = type(best_model).__name__
 
     return (
         {
             "label": label,
             "task": "classification",
-            "model": f"PyCaret_{model_name}",
+            "model": f"AutoGluon_{best_model}",
             "samples": len(frame),
             "features": len(features.columns),
             "score_primary": _round(float(balanced_accuracy_score(y_test, predictions))),
@@ -360,26 +363,10 @@ def _fit_classification(
             "accuracy": _round(float(accuracy_score(y_test, predictions))),
             "balanced_accuracy": _round(float(balanced_accuracy_score(y_test, predictions))),
             "f1_weighted": _round(float(f1_score(y_test, predictions, average="weighted"))),
-            "note": f"classes={class_count}",
+            "note": f"classes={class_count}, best_model={best_model}",
         },
         importance,
     )
-
-
-def _feature_importance(
-    label: str, feature_names: pd.Index, importances: np.ndarray
-) -> list[dict[str, object]]:
-    values = np.asarray(importances, dtype=float).reshape(-1)
-    rows = [
-        {
-            "label": label,
-            "feature": str(feature),
-            "importance": _round(float(value)),
-            "importance_name": "pycaret_feature_importance",
-        }
-        for feature, value in zip(feature_names, values, strict=False)
-    ]
-    return sorted(rows, key=lambda row: row["importance"] or 0, reverse=True)
 
 
 def _importance_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
@@ -395,12 +382,12 @@ def _importance_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
 
 
 def _render_markdown(
-    metadata: PyCaretRunMetadata, model_results: pd.DataFrame, importances: pd.DataFrame
+    metadata: AutoGluonRunMetadata, model_results: pd.DataFrame, importances: pd.DataFrame
 ) -> str:
     scores = (
         _markdown_table(model_results)
         if not model_results.empty
-        else "No PyCaret models were available."
+        else "No AutoGluon models were available."
     )
     top_importance = (
         _markdown_table(importances.groupby("label", group_keys=False).head(10))
@@ -408,7 +395,7 @@ def _render_markdown(
         else "No feature importance was available."
     )
     ignored = ", ".join(metadata.ignored_columns) if metadata.ignored_columns else "none"
-    return f"""# PyCaret AutoML Feature/Label Relationship Report
+    return f"""# AutoGluon AutoML Feature/Label Relationship Report
 
 ## Run
 
@@ -457,7 +444,7 @@ def _render_html(markdown: str, model_results: pd.DataFrame, importances: pd.Dat
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>PyCaret AutoML Feature/Label Relationship Report</title>
+  <title>AutoGluon AutoML Feature/Label Relationship Report</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 32px; color: #1f2933; }}
     pre {{ white-space: pre-wrap; background: #f5f7fa; padding: 16px; border-radius: 6px; }}

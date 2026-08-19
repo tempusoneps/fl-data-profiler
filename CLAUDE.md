@@ -9,8 +9,8 @@ This file is generated from project documentation. Do not edit it directly.
 
 `fl-data-profiling` is a Python 3.12 package for profiling relationships and predictive power between feature datasets (`feature.parquet` / `feature.csv`) and label datasets (`label.csv` / `label.parquet`). 
 
-Source code lives in `fldataprofier/`:
-- `cli.py`: provides the CLI entry point (`fldataprofiler` / `fldataprofier`).
+Source code lives in `src/fldataprofiler/`:
+- `cli.py`: provides the CLI entry point (`fldataprofiler`).
 - `registry.py`: manages registration, lookup, and aliasing of all profiling modules.
 - `utils.py`: common data loading (`.csv`, `.parquet`), datetime indexing, merging, type casting, markdown/HTML rendering, and row limit/full mode context managers.
 - `modules/`: contains 25 profiling modules implementing `ProfilingModule` interface (`run(feature_csv, label_csv, output_dir, join_key, targets) -> ModuleResult`).
@@ -62,8 +62,8 @@ Tests should use small synthetic DataFrames with `Date`, features, and targets t
 # Project Rules & Development Conventions
 
 ## 1. Keep Structure & Registry In Sync
-Any change that adds, removes, or renames profiling modules in `fldataprofier/modules/` must update:
-- `fldataprofier/registry.py` (Registry dictionary and module loader).
+Any change that adds, removes, or renames profiling modules in `src/fldataprofiler/modules/` must update:
+- `src/fldataprofiler/registry.py` (Registry dictionary and module loader).
 - `docs/.ai/STRUCTURE.md` and `docs/README.md`.
 - Matching documentation file in `docs/<module>.md`.
 
@@ -90,7 +90,7 @@ Every module must generate the following standard artifacts in `reports/<module>
 - `*.csv`: Tabular scoring data (e.g. `feature_scores.csv`, `top_features.csv`, `kmean_results.csv`).
 
 ## 4. Full vs Subsampled Data Respect
-Modules that utilize internal row limits (`MAX_ROWS`) must check `_FULL_ROW_MODE.get()` from `fldataprofier.utils` so that `--full` correctly disables downsampling across all stages.
+Modules that utilize internal row limits (`MAX_ROWS`) must check `_FULL_ROW_MODE.get()` from `fldataprofiler.utils` so that `--full` correctly disables downsampling across all stages.
 
 ## 5. Run Targeted Tests First
 When developing or debugging, run targeted tests (e.g. `uv run pytest tests/test_input_formats.py -q`). Do not run heavy end-to-end extraction tests repeatedly unless verifying full release readiness.
@@ -154,11 +154,12 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
 │   ├── feature.parquet               # Extracted features dataset.
 │   └── label.csv                     # Extracted classification/regression labels.
 │
-├── fldataprofier/                    # Python package source root.
-│   ├── __init__.py                   # Package exports.
-│   ├── cli.py                        # CLI argument parser and entry point.
-│   ├── registry.py                   # Module registry and factory.
-│   ├── utils.py                      # Data ingestion, indexing, and rendering helpers.
+├── src/                             # Python package source root.
+│   └── fldataprofiler/               # Main package module.
+│       ├── __init__.py               # Package exports.
+│       ├── cli.py                    # CLI argument parser and entry point.
+│       ├── registry.py               # Module registry and factory.
+│       ├── utils.py                  # Data ingestion, indexing, and rendering helpers.
 │   │
 │   └── modules/                      # 25 Profiling Module Implementations.
 │       ├── __init__.py               # Module package marker.

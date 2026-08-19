@@ -9,7 +9,7 @@ import pandas as pd
 
 class TimeSeriesScoringUtilityTests(unittest.TestCase):
     def test_walk_forward_splits_are_expanding(self) -> None:
-        from fldataprofier.modules.time_series_scoring import walk_forward_splits
+        from fldataprofiler.modules.time_series_scoring import walk_forward_splits
 
         splits = walk_forward_splits(
             260,
@@ -24,7 +24,7 @@ class TimeSeriesScoringUtilityTests(unittest.TestCase):
         )
 
     def test_aggregate_scores_sorts_by_abs_mean(self) -> None:
-        from fldataprofier.modules.time_series_scoring import aggregate_scores
+        from fldataprofiler.modules.time_series_scoring import aggregate_scores
 
         result = aggregate_scores(
             [
@@ -57,7 +57,7 @@ class TimeSeriesScoringUtilityTests(unittest.TestCase):
         self.assertEqual(0.7, round(float(result.iloc[0]["mean_abs_score"]), 3))
 
     def test_permutation_importance_uses_serial_random_forest_jobs(self) -> None:
-        from fldataprofier.modules.time_series_scoring import (
+        from fldataprofiler.modules.time_series_scoring import (
             permutation_importance_rows,
         )
 
@@ -84,7 +84,7 @@ class TimeSeriesScoringUtilityTests(unittest.TestCase):
         )
 
         with patch(
-            "fldataprofier.modules.time_series_scoring.RandomForestRegressor",
+            "fldataprofiler.modules.time_series_scoring.RandomForestRegressor",
             FakeRegressor,
         ):
             permutation_importance_rows(

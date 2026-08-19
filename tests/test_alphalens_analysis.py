@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fldataprofier.modules.alphalens_analysis import AlphalensAnalysisModule
-from fldataprofier.registry import get_module
+from fldataprofiler.modules.alphalens_analysis import AlphalensAnalysisModule
+from fldataprofiler.registry import get_module
 
 
 def make_alphalens_synthetic_dataset(base_dir: Path, rows: int = 300) -> tuple[Path, Path]:

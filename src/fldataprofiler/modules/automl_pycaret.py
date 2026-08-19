@@ -6,8 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import Ridge, SGDClassifier
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
@@ -17,12 +15,12 @@ from sklearn.metrics import (
     r2_score,
 )
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.statistics import DatasetShape
-from fldataprofier.utils import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.statistics import DatasetShape
+from fldataprofiler.utils import (
     _date_columns,
     _html_markdown_details,
     _markdown_table,
@@ -41,10 +39,11 @@ from fldataprofier.utils import (
 MAX_ROWS = 20_000
 MAX_CLASS_COUNT = 50
 RANDOM_STATE = 42
+TIME_BUDGET_SECONDS = 60  # Default time budget per target
 
 
 @dataclass(frozen=True)
-class SklearnRunMetadata:
+class PyCaretRunMetadata:
     module: str
     created_at: str
     feature_csv: str
@@ -57,10 +56,14 @@ class SklearnRunMetadata:
     features: list[str]
     targets: list[str]
     ignored_columns: list[str]
+    time_budget: int
 
 
-class SklearnRelationshipsModule:
-    name = "sklearn"
+class PyCaretRelationshipsModule:
+    name = "pycaret"
+
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
 
     def run(
         self,
@@ -70,6 +73,13 @@ class SklearnRelationshipsModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
+        import importlib.util
+
+        if importlib.util.find_spec("pycaret") is None:
+            raise ImportError(
+                "PyCaret is not installed. Please run `uv pip install pycaret` or `pip install pycaret` to install it."
+            )
+
         features = _read_table_with_date_index(feature_csv)
         labels = _read_table_with_date_index(label_csv)
         merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -85,16 +95,25 @@ class SklearnRelationshipsModule:
         model_frame = _sample_rows(
             merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
         )
-        model_results, importances = _fit_target_models(
-            model_frame,
-            numeric_features,
-            selected_targets,
-        )
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with ModuleProgress(
+                self.name, total=len(selected_targets), enabled=self.progress
+            ) as progress_bar:
+                model_results, importances = _fit_target_models(
+                    model_frame,
+                    numeric_features,
+                    selected_targets,
+                    progress_bar,
+                )
 
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        metadata = SklearnRunMetadata(
+        metadata = PyCaretRunMetadata(
             module=self.name,
             created_at=datetime.now(UTC).isoformat(),
             feature_csv=str(feature_csv),
@@ -107,6 +126,7 @@ class SklearnRelationshipsModule:
             features=numeric_features,
             targets=selected_targets,
             ignored_columns=ignored_columns,
+            time_budget=TIME_BUDGET_SECONDS,
         )
 
         artifacts = [
@@ -135,7 +155,10 @@ class SklearnRelationshipsModule:
 
 
 def _fit_target_models(
-    merged: pd.DataFrame, feature_columns: list[str], label_columns: list[str]
+    merged: pd.DataFrame,
+    feature_columns: list[str],
+    label_columns: list[str],
+    progress_bar: ModuleProgress | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     result_rows: list[dict[str, object]] = []
     importance_rows: list[dict[str, object]] = []
@@ -160,40 +183,82 @@ def _fit_target_models(
             result_rows.append(result)
         importance_rows.extend(importance)
 
+        if progress_bar is not None:
+            progress_bar.step(label)
+
     return _model_results_frame(result_rows), _importance_frame(importance_rows)
 
 
 def _fit_regression(
     label: str, features: pd.DataFrame, target: pd.Series
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
+    from pycaret.regression import compare_models, predict_model, setup
+
     frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
     if len(frame) < 30 or frame[label].nunique() < 2:
         return None, []
 
-    x = frame[features.columns]
-    y = frame[label]
     x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=0.2, random_state=RANDOM_STATE
+        frame[features.columns],
+        frame[label],
+        test_size=0.2,
+        random_state=RANDOM_STATE,
     )
-    pipeline = Pipeline(
-        [
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-            ("model", Ridge(alpha=1.0)),
-        ]
+
+    train_data = pd.concat([x_train, y_train], axis=1)
+
+    # Initialize PyCaret setup
+    setup(
+        data=train_data,
+        target=label,
+        session_id=RANDOM_STATE,
+        verbose=False,
+        html=False,
     )
-    pipeline.fit(x_train, y_train)
-    predictions = pipeline.predict(x_test)
+
+    # Compare models with a time budget
+    best_model = compare_models(budget_time=TIME_BUDGET_SECONDS, verbose=False)
+    if best_model is None:
+        return None, []
+
+    # Evaluate on holdout/test set
+    preds_df = predict_model(best_model, data=x_test)
+    # PyCaret regression output typically adds a 'prediction_label' column
+    predictions = preds_df["prediction_label"].values
+
     rmse = float(np.sqrt(mean_squared_error(y_test, predictions)))
-    model = pipeline.named_steps["model"]
-    importance = _coefficient_importance(
-        label, features.columns, model.coef_, "ridge_abs_coefficient"
-    )
+
+    # Extract feature importance dynamically
+    feature_imp_vals = None
+    try:
+        # Check standard properties
+        if (
+            hasattr(best_model, "feature_importances_")
+            and best_model.feature_importances_ is not None
+        ):
+            feature_imp_vals = best_model.feature_importances_
+        elif hasattr(best_model, "coef_") and best_model.coef_ is not None:
+            feature_imp_vals = np.abs(best_model.coef_)
+        elif hasattr(best_model, "named_steps") and "model" in best_model.named_steps:
+            inner_model = best_model.named_steps["model"]
+            if hasattr(inner_model, "feature_importances_"):
+                feature_imp_vals = inner_model.feature_importances_
+            elif hasattr(inner_model, "coef_"):
+                feature_imp_vals = np.abs(inner_model.coef_)
+    except Exception:
+        pass
+
+    if feature_imp_vals is None or len(feature_imp_vals) != len(features.columns):
+        feature_imp_vals = np.zeros(len(features.columns))
+
+    importance = _feature_importance(label, features.columns, feature_imp_vals)
+    model_name = type(best_model).__name__
+
     return (
         {
             "label": label,
             "task": "regression",
-            "model": "Ridge",
+            "model": f"PyCaret_{model_name}",
             "samples": len(frame),
             "features": len(features.columns),
             "score_primary": _round(float(r2_score(y_test, predictions))),
@@ -212,54 +277,80 @@ def _fit_regression(
 def _fit_classification(
     label: str, features: pd.DataFrame, target: pd.Series
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
+    from pycaret.classification import compare_models, predict_model, setup
+
     frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
     class_count = int(frame[label].nunique(dropna=True))
     if len(frame) < 30 or class_count < 2 or class_count > MAX_CLASS_COUNT:
         return None, []
 
     encoder = LabelEncoder()
-    y = encoder.fit_transform(frame[label].astype(str))
-    if np.min(np.bincount(y)) < 2:
+    # PyCaret can handle string/categorical target, but mapping to encoded is safer
+    y_encoded = encoder.fit_transform(frame[label].astype(str))
+    class_sizes = np.bincount(y_encoded)
+    if np.min(class_sizes) < 2:
         return None, []
 
     x_train, x_test, y_train, y_test = train_test_split(
         frame[features.columns],
-        y,
+        y_encoded,
         test_size=0.2,
         random_state=RANDOM_STATE,
-        stratify=y,
+        stratify=y_encoded,
     )
-    pipeline = Pipeline(
-        [
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-            (
-                "model",
-                SGDClassifier(
-                    class_weight="balanced",
-                    loss="log_loss",
-                    max_iter=1_000,
-                    n_jobs=-1,
-                    tol=1e-3,
-                    random_state=RANDOM_STATE,
-                ),
-            ),
-        ]
+
+    train_data = pd.concat([x_train, pd.Series(y_train, name=label)], axis=1)
+
+    # Initialize PyCaret setup
+    setup(
+        data=train_data,
+        target=label,
+        session_id=RANDOM_STATE,
+        verbose=False,
+        html=False,
     )
-    pipeline.fit(x_train, y_train)
-    predictions = pipeline.predict(x_test)
-    model = pipeline.named_steps["model"]
-    coefficients = model.coef_
-    if coefficients.ndim == 2:
-        coefficients = np.mean(np.abs(coefficients), axis=0)
-    importance = _coefficient_importance(
-        label, features.columns, coefficients, "logistic_abs_coefficient"
-    )
+
+    # Compare models with a time budget
+    best_model = compare_models(budget_time=TIME_BUDGET_SECONDS, verbose=False)
+    if best_model is None:
+        return None, []
+
+    # Evaluate on test set
+    preds_df = predict_model(best_model, data=x_test)
+    # PyCaret classification output typically adds 'prediction_label' column
+    predictions = preds_df["prediction_label"].values
+
+    # Extract feature importance dynamically
+    feature_imp_vals = None
+    try:
+        # Check standard properties
+        if (
+            hasattr(best_model, "feature_importances_")
+            and best_model.feature_importances_ is not None
+        ):
+            feature_imp_vals = best_model.feature_importances_
+        elif hasattr(best_model, "coef_") and best_model.coef_ is not None:
+            feature_imp_vals = np.abs(best_model.coef_)
+        elif hasattr(best_model, "named_steps") and "model" in best_model.named_steps:
+            inner_model = best_model.named_steps["model"]
+            if hasattr(inner_model, "feature_importances_"):
+                feature_imp_vals = inner_model.feature_importances_
+            elif hasattr(inner_model, "coef_"):
+                feature_imp_vals = np.abs(inner_model.coef_)
+    except Exception:
+        pass
+
+    if feature_imp_vals is None or len(feature_imp_vals) != len(features.columns):
+        feature_imp_vals = np.zeros(len(features.columns))
+
+    importance = _feature_importance(label, features.columns, feature_imp_vals)
+    model_name = type(best_model).__name__
+
     return (
         {
             "label": label,
             "task": "classification",
-            "model": "SGDClassifier(log_loss)",
+            "model": f"PyCaret_{model_name}",
             "samples": len(frame),
             "features": len(features.columns),
             "score_primary": _round(float(balanced_accuracy_score(y_test, predictions))),
@@ -275,17 +366,16 @@ def _fit_classification(
     )
 
 
-def _coefficient_importance(
-    label: str, feature_names: pd.Index, coefficients: np.ndarray, importance_name: str
+def _feature_importance(
+    label: str, feature_names: pd.Index, importances: np.ndarray
 ) -> list[dict[str, object]]:
-    values = np.asarray(coefficients, dtype=float).reshape(-1)
+    values = np.asarray(importances, dtype=float).reshape(-1)
     rows = [
         {
             "label": label,
             "feature": str(feature),
-            "importance": _round(float(abs(value))),
-            "importance_name": importance_name,
-            "coefficient": _round(float(value)),
+            "importance": _round(float(value)),
+            "importance_name": "pycaret_feature_importance",
         }
         for feature, value in zip(feature_names, values, strict=False)
     ]
@@ -293,30 +383,32 @@ def _coefficient_importance(
 
 
 def _importance_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
-    columns = ["label", "feature", "importance", "importance_name", "coefficient"]
+    columns = ["label", "feature", "importance", "importance_name"]
     frame = pd.DataFrame(rows, columns=columns)
     if frame.empty:
         return frame
     return frame.sort_values(
-        ["label", "importance"], ascending=[True, False], na_position="last"
+        ["label", "importance"],
+        ascending=[True, False],
+        na_position="last",
     ).reset_index(drop=True)
 
 
 def _render_markdown(
-    metadata: SklearnRunMetadata, model_results: pd.DataFrame, importances: pd.DataFrame
+    metadata: PyCaretRunMetadata, model_results: pd.DataFrame, importances: pd.DataFrame
 ) -> str:
     scores = (
         _markdown_table(model_results)
         if not model_results.empty
-        else "No sklearn models were available."
+        else "No PyCaret models were available."
     )
     top_importance = (
         _markdown_table(importances.groupby("label", group_keys=False).head(10))
         if not importances.empty
-        else "No coefficient importance was available."
+        else "No feature importance was available."
     )
     ignored = ", ".join(metadata.ignored_columns) if metadata.ignored_columns else "none"
-    return f"""# Sklearn Feature/Label Relationship Report
+    return f"""# PyCaret AutoML Feature/Label Relationship Report
 
 ## Run
 
@@ -332,6 +424,7 @@ def _render_markdown(
 - Ignored columns: {ignored}
 - Numeric features: {len(metadata.features)}
 - Targets: {", ".join(metadata.targets)}
+- Time budget per target: {metadata.time_budget} seconds
 
 ## Model Scores
 
@@ -364,7 +457,7 @@ def _render_html(markdown: str, model_results: pd.DataFrame, importances: pd.Dat
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Sklearn Feature/Label Relationship Report</title>
+  <title>PyCaret AutoML Feature/Label Relationship Report</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 32px; color: #1f2933; }}
     pre {{ white-space: pre-wrap; background: #f5f7fa; padding: 16px; border-radius: 6px; }}

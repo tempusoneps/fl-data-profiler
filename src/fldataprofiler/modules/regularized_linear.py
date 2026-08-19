@@ -8,16 +8,16 @@ from sklearn.linear_model import ElasticNetCV, LogisticRegressionCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-from fldataprofier.modules.base import ModuleResult
-from fldataprofier.modules.progress import ModuleProgress
-from fldataprofier.modules.time_series_scoring import (
+from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.time_series_scoring import (
     build_result,
     impute_numeric_frame,
     is_classification_target,
     load_prepared_data,
     prepare_numeric_matrix,
 )
-from fldataprofier.utils import _numeric_series, _write_csv
+from fldataprofiler.utils import _numeric_series, _write_csv
 
 
 class RegularizedLinearModule:

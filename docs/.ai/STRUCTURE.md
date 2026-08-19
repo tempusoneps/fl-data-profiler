@@ -55,11 +55,12 @@
 │   ├── feature.parquet               # Extracted features dataset.
 │   └── label.csv                     # Extracted classification/regression labels.
 │
-├── fldataprofier/                    # Python package source root.
-│   ├── __init__.py                   # Package exports.
-│   ├── cli.py                        # CLI argument parser and entry point.
-│   ├── registry.py                   # Module registry and factory.
-│   ├── utils.py                      # Data ingestion, indexing, and rendering helpers.
+├── src/                             # Python package source root.
+│   └── fldataprofiler/               # Main package module.
+│       ├── __init__.py               # Package exports.
+│       ├── cli.py                    # CLI argument parser and entry point.
+│       ├── registry.py               # Module registry and factory.
+│       ├── utils.py                  # Data ingestion, indexing, and rendering helpers.
 │   │
 │   └── modules/                      # 25 Profiling Module Implementations.
 │       ├── __init__.py               # Module package marker.
