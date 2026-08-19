@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from sklearn.preprocessing import LabelEncoder
 
 from fldataprofiler.modules.base import ModuleResult
 from fldataprofiler.utils import (
+    _format_duration,
     _html_markdown_details,
     _markdown_table,
     _merge_inputs,
@@ -44,6 +46,7 @@ class PreparedData:
     feature_columns: list[str]
     target_columns: list[str]
     join_strategy: str
+    start_time: float = 0.0
 
 
 def walk_forward_splits(
@@ -79,6 +82,7 @@ def load_prepared_data(
     join_key: str | None,
     targets: list[str] | None,
 ) -> PreparedData:
+    start_time = time.perf_counter()
     features = _read_table_with_date_index(feature_csv)
     labels = _read_table_with_date_index(label_csv)
     merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -93,6 +97,7 @@ def load_prepared_data(
         feature_columns=feature_columns,
         target_columns=_select_targets(label_columns, targets),
         join_strategy=join_strategy,
+        start_time=start_time,
     )
 
 
@@ -203,6 +208,11 @@ def build_result(
     artifacts: list[Path],
     extra_summary: dict[str, object] | None = None,
 ) -> ModuleResult:
+    duration = time.perf_counter() - prepared.start_time if prepared.start_time > 0 else 0.0
+    execution_time = _format_duration(duration)
+    summary_extra = {"execution_time": execution_time}
+    if extra_summary:
+        summary_extra.update(extra_summary)
     artifacts.extend(
         write_standard_report(
             report_dir,
@@ -212,7 +222,7 @@ def build_result(
             prepared.join_strategy,
             prepared.target_columns,
             feature_scores,
-            extra_summary,
+            summary_extra,
         )
     )
     return ModuleResult(report_dir=report_dir, artifacts=artifacts)
@@ -439,12 +449,25 @@ def _render_report_markdown(
     payload: dict[str, object],
     top_scores: pd.DataFrame,
 ) -> str:
+    run_lines = [
+        f"- Module: `{module_name}`",
+        f"- Created at: `{payload['created_at']}`",
+    ]
+    if "execution_time" in payload:
+        run_lines.append(f"- Execution time: `{payload['execution_time']}`")
+    run_lines.extend(
+        [
+            f"- Feature CSV: `{payload['feature_csv']}`",
+            f"- Label CSV: `{payload['label_csv']}`",
+            f"- Join strategy: {payload['join_strategy']}",
+            f"- Targets: {', '.join(str(target) for target in payload['targets'])}",
+        ]
+    )
     return "\n\n".join(
         [
             f"# {module_name} report",
-            f"- Created at: `{payload['created_at']}`",
-            f"- Join strategy: {payload['join_strategy']}",
-            f"- Targets: {', '.join(str(target) for target in payload['targets'])}",
+            "## Run",
+            "\n".join(run_lines),
             "## Top features",
             _markdown_table(top_scores),
             "",

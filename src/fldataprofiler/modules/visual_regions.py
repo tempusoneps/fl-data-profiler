@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from itertools import combinations
@@ -13,6 +12,7 @@ from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
+    _format_duration,
     _html_markdown_details,
     _markdown_table,
     _merge_inputs,
@@ -56,6 +56,7 @@ PAIR_SCORE_COLUMNS = [
 class VisualRegionsRunMetadata:
     module: str
     created_at: str
+    execution_time: str
     feature_csv: str
     label_csv: str
     join_strategy: str
@@ -355,11 +356,16 @@ def _render_rules_markdown(
     lines = [
         "# Visual Regions (2D Rules)",
         "",
-        f"**Module:** `{metadata.module}`",
-        f"**Generated:** `{metadata.created_at}`",
-        f"**Feature Set:** `{metadata.feature_shape.rows} rows, {metadata.feature_shape.columns} cols`",
-        f"**Label Set:** `{metadata.label_shape.rows} rows, {metadata.label_shape.columns} cols`",
-        f"**Merged Set:** `{metadata.merged_shape.rows} rows, {metadata.merged_shape.columns} cols`",
+        "## Run",
+        "",
+        f"- Module: `{metadata.module}`",
+        f"- Created at: `{metadata.created_at}`",
+        f"- Execution time: `{metadata.execution_time}`",
+        f"- Feature CSV: `{metadata.feature_csv}`",
+        f"- Label CSV: `{metadata.label_csv}`",
+        f"- Feature shape: {metadata.feature_shape.rows} rows x {metadata.feature_shape.columns} columns",
+        f"- Label shape: {metadata.label_shape.rows} rows x {metadata.label_shape.columns} columns",
+        f"- Merged shape: {metadata.merged_shape.rows} rows x {metadata.merged_shape.columns} columns",
         "",
     ]
 
@@ -408,6 +414,7 @@ class VisualRegionsModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
+        start_time = time.perf_counter()
         feature_path = Path(feature_csv)
         label_path = Path(label_csv)
         out_path = Path(output_dir) / self.name
@@ -437,6 +444,7 @@ class VisualRegionsModule:
             metadata = VisualRegionsRunMetadata(
                 module=self.name,
                 created_at=datetime.now(UTC).isoformat(),
+                execution_time=_format_duration(time.perf_counter() - start_time),
                 feature_csv=feature_path.name,
                 label_csv=label_path.name,
                 join_strategy="inner",
