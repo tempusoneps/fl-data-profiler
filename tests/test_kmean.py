@@ -119,6 +119,23 @@ class KMeanTests(unittest.TestCase):
         selected = _select_sequential_rows(df, 10)
         self.assertEqual(list(range(10)), selected["a"].tolist())
 
+    def test_safe_silhouette_handles_single_cluster_in_sample(self) -> None:
+        import numpy as np
+
+        from fldataprofier.modules.kmean import _safe_silhouette
+
+        # Single cluster only
+        features = np.random.randn(100, 2)
+        clusters = np.zeros(100, dtype=int)
+        self.assertIsNone(_safe_silhouette(features, clusters))
+
+        # Extreme imbalance where downsampled subset has only 1 class
+        clusters_imbalanced = np.zeros(5000, dtype=int)
+        clusters_imbalanced[0] = 1  # only 1 instance of class 1 in 5000 items
+        # _safe_silhouette downsamples to 1000 items, highly likely to contain only class 0
+        score = _safe_silhouette(np.random.randn(5000, 2), clusters_imbalanced)
+        self.assertTrue(score is None or isinstance(score, float))
+
 
 if __name__ == "__main__":
     unittest.main()

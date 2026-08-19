@@ -54,7 +54,6 @@ def walk_forward_splits(
     max_folds: int = 20,
 ) -> list[tuple[int, int, int, int]]:
     for name, value in {
-        "n_rows": n_rows,
         "min_train_size": min_train_size,
         "test_size": test_size,
         "step_size": step_size,
@@ -62,6 +61,9 @@ def walk_forward_splits(
     }.items():
         if not isinstance(value, int) or value <= 0:
             raise ValueError(f"{name} must be a positive integer")
+
+    if not isinstance(n_rows, int) or n_rows <= 0:
+        return []
 
     splits: list[tuple[int, int, int, int]] = []
     train_end = min_train_size

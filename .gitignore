@@ -5,6 +5,7 @@
 **ipynb_checkpoints
 *.csv
 *.parquet
+*.log
 reports/*
 __pycache__/
 *.py[cod]
