@@ -266,3 +266,12 @@ def _markdown_cell(value: object) -> str:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return ""
     return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    minutes = int(seconds // 60)
+    rem = seconds % 60
+    return f"{minutes}m {rem:.2f}s ({seconds:.2f}s)"
+

@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +22,7 @@ from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
+    _format_duration,
     _markdown_table,
     _merge_inputs,
     _numeric_series,
@@ -42,6 +42,7 @@ TARGET_LABEL = "allow_entry"
 class SignalRunMetadata:
     module: str
     created_at: str
+    execution_time: str
     feature_csv: str
     label_csv: str
     join_strategy: str
@@ -67,6 +68,7 @@ class SignalAnalysisModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
+        start_time = time.perf_counter()
         features = _read_table_with_date_index(feature_csv)
         labels = _read_table_with_date_index(label_csv)
         merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -123,6 +125,7 @@ class SignalAnalysisModule:
         metadata = SignalRunMetadata(
             module=self.name,
             created_at=datetime.now(UTC).isoformat(),
+            execution_time=_format_duration(time.perf_counter() - start_time),
             feature_csv=str(feature_csv),
             label_csv=str(label_csv),
             join_strategy=join_strategy,
@@ -493,6 +496,7 @@ def _render_markdown(
 
 - Module: `{metadata.module}`
 - Created at: `{metadata.created_at}`
+- Execution time: `{metadata.execution_time}`
 - Feature CSV: `{metadata.feature_csv}`
 - Label CSV: `{metadata.label_csv}`
 - Join strategy: {metadata.join_strategy}

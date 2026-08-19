@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from fldataprofiler.modules.base import ModuleResult
 from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
+    _format_duration,
     _html_markdown_details,
     _markdown_table,
     _numeric_series,
@@ -32,6 +34,7 @@ MAX_CORRELATION_HEATMAP_COLUMNS = 80
 class EdaRunMetadata:
     module: str
     created_at: str
+    execution_time: str
     feature_csv: str
     label_csv: str
     feature_shape: DatasetShape
@@ -52,6 +55,7 @@ class EdaModule:
         join_key: str | None = None,
         targets: list[str] | None = None,
     ) -> ModuleResult:
+        start_time = time.perf_counter()
         with ModuleProgress(self.name, total=7, enabled=self.progress) as progress_bar:
             features = _read_table(feature_csv)
             labels = _read_table(label_csv)
@@ -66,6 +70,7 @@ class EdaModule:
             metadata = EdaRunMetadata(
                 module=self.name,
                 created_at=datetime.now(UTC).isoformat(),
+                execution_time=_format_duration(time.perf_counter() - start_time),
                 feature_csv=str(feature_csv),
                 label_csv=str(label_csv),
                 feature_shape=DatasetShape(*features.shape),
@@ -324,6 +329,7 @@ def _render_markdown(
 
 - Module: `{metadata.module}`
 - Created at: `{metadata.created_at}`
+- Execution time: `{metadata.execution_time}`
 - Feature CSV: `{metadata.feature_csv}`
 - Label CSV: `{metadata.label_csv}`
 - Feature shape: {metadata.feature_shape.rows} rows x {metadata.feature_shape.columns} columns
