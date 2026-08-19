@@ -1,0 +1,40 @@
+# Module Catalog
+
+`fl-data-profiling` provides 25 specialized profiling modules accessible via `--module <name>`:
+
+## 1. Factor & Signal Analysis
+- **`alphalens`**: Factor tearsheet analysis, forward return quantiles (Q1-Q5), IC decay ($t+1, t+5, t+15, t+60$), Information Ratio (IR), and long-short cumulative spread curve.
+- **`information_coefficient`**: Walk-forward time-series Pearson IC and Spearman Rank IC across rolling time folds.
+- **`signal_analysis`**: Single trading signal scoring (ROC-AUC, PR-AUC, F1), signal redundancy matrix, and combined XGBoost multi-signal model.
+- **`regime_scoring`**: Market regime-aware feature scoring across volatility/trend segments.
+
+## 2. Exploratory Data Analysis & Statistics
+- **`eda`**: Comprehensive exploratory data analysis: missingness profile, numeric & categorical distributions, correlation heatmaps.
+- **`statistics`**: Descriptive statistics, Pearson linear correlations, and label quantile mean distributions.
+- **`scipy`**: Mathematical hypothesis testing ($t$-test, ANOVA $F$, Kruskal-Wallis, Mann-Whitney U, Chi-square, Cohen's $d$, Cramer's $V$).
+- **`statsmodels`**: Econometric OLS and Logit regression: $eta$ coefficients, standard errors, $t$-statistics, $p$-values, 95% confidence intervals, AIC/BIC.
+
+## 3. Clustering & Decision Rules
+- **`kmean`**: Unsupervised KMeans clustering on 2D feature pairs $(F_1, F_2)$ to measure target label separability and purity.
+- **`visual_regions`**: Quantile grid discretization and 2D bounding-box decision rule generation (`IF F1 IN [...] AND F2 IN [...] THEN Class X`).
+
+## 4. Feature Selection & Scoring
+- **`mutual_information`**: Model-agnostic non-linear dependency estimation via Mutual Information.
+- **`permutation_importance_ts`**: Time-series out-of-fold permutation importance using Random Forest models.
+- **`timeseries_importance`**: Normalized unified multi-criteria score combining IC, Permutation drop, MI, and correlation support.
+- **`mrmr`**: Minimum Redundancy Maximum Relevance feature selection.
+- **`stability_selection`**: Subsampling-based stability selection with randomized regularized regression.
+- **`feature_interactions`**: Automated discovery and evaluation of pairwise feature interaction terms ($F_1 	imes F_2$, $F_1 / F_2$, $F_1 - F_2$).
+- **`boruta`**: All-relevant feature selection using Random Forest shadow feature contrast.
+
+## 5. Machine Learning Models
+- **`xgboost`**: Gradient boosted decision trees with Gain/Weight/Cover importance, confusion matrices, and regression curves.
+- **`lightgbm`**: High-speed histogram-based GBDT feature importance (Split & Gain).
+- **`shap`**: Model interpretability via TreeSHAP and Mean Absolute SHAP values.
+- **`sklearn`**: Scikit-Learn linear baselines (SGDClassifier & Ridge Regression).
+- **`regularized_linear`**: Lasso (L1) and Ridge (L2) feature shrinkage and coefficient importance.
+
+## 6. Automated Machine Learning (AutoML)
+- **`autogluon`**: Amazon AutoGluon multi-layer stacking ensemble and leaderboard.
+- **`flaml`**: Microsoft FLAML fast and cost-frugal AutoML search.
+- **`pycaret`**: Low-code AutoML comparing over 15 estimators.\n
