@@ -145,3 +145,26 @@ def test_cli_prune_invalid_extension(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["prune", str(invalid_file)])
     assert excinfo.value.code == 2
+
+
+def test_cli_prune_preserves_date_index(tmp_path: Path) -> None:
+    feat_file = tmp_path / "feature.parquet"
+    out_file = tmp_path / "selected_feature.parquet"
+
+    df = pd.DataFrame(
+        {
+            "f1": np.random.randn(50),
+            "f2": np.random.randn(50),
+        },
+        index=pd.date_range("2024-01-01", periods=50, name="Date"),
+    )
+    df.to_parquet(feat_file, index=True)
+
+    exit_code = main(["prune", str(feat_file), "--output", str(out_file)])
+    assert exit_code == 0
+    assert out_file.exists()
+
+    df_out = pd.read_parquet(out_file)
+    assert df_out.index.name == "Date"
+    assert "f1" in df_out.columns
+    assert "f2" in df_out.columns

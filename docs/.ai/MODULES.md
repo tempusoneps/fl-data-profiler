@@ -1,9 +1,11 @@
 # Module Catalog
 
-`fl-data-profiling` provides 25 specialized profiling modules accessible via `--module <name>`:
+`fl-data-profiling` provides 27 specialized profiling modules accessible via `--module <name>`:
 
 ## 1. Factor & Signal Analysis
 - **`alphalens`**: Factor tearsheet analysis, forward return quantiles (Q1-Q5), IC decay ($t+1, t+5, t+15, t+60$), Information Ratio (IR), and long-short cumulative spread curve.
+- **`probability`**: 20-bin Quantile Conditional Probability distributions, Information Value (IV), Weight of Evidence (WoE), Probability Spread, Monotonicity, and Shannon Entropy.
+- **`probability_2d`** (hoặc `probability2d`): 2D Joint Probability Heatmaps on $10 \times 10$ quantile grids, 2D Information Value ($IV_{2D}$), Synergy Gain, and Sweet Spot Rule extraction.
 - **`information_coefficient`**: Walk-forward time-series Pearson IC and Spearman Rank IC across rolling time folds.
 - **`signal_analysis`**: Single trading signal scoring (ROC-AUC, PR-AUC, F1), signal redundancy matrix, and combined XGBoost multi-signal model.
 - **`regime_scoring`**: Market regime-aware feature scoring across volatility/trend segments.

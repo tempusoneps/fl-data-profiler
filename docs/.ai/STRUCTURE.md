@@ -36,6 +36,8 @@
 │   ├── mrmr.md                       # mRMR feature selection documentation.
 │   ├── mutual_information.md         # Mutual information documentation.
 │   ├── permutation_importance_ts.md  # Time-series permutation importance docs.
+│   ├── probability.md                # 20-bin Quantile Conditional Probability & WoE/IV docs.
+│   ├── probability_2d.md             # 2D Joint Probability Heatmap & Sweet Spots docs.
 │   ├── pycaret.md                    # PyCaret AutoML documentation.
 │   ├── regime_scoring.md             # Regime-based feature scoring documentation.
 │   ├── regularized_linear.md         # Regularized linear regression docs.
@@ -63,7 +65,7 @@
 │       ├── registry.py               # Module registry and factory.
 │       ├── utils.py                  # Data ingestion, indexing, and rendering helpers.
 │   │
-│   └── modules/                      # 25 Profiling Module Implementations.
+│   └── modules/                      # 27 Profiling Module Implementations.
 │       ├── __init__.py               # Module package marker.
 │       ├── base.py                   # ProfilingModule protocol & ModuleResult.
 │       ├── progress.py               # Shared progress reporting bar.
@@ -81,6 +83,8 @@
 │       ├── mrmr.py                   # mRMR selection module.
 │       ├── mutual_information.py     # Mutual Information scoring module.
 │       ├── permutation_importance_ts.py # Time-series permutation module.
+│       ├── probability.py            # 20-bin Quantile Conditional Probability & WoE/IV module.
+│       ├── probability_2d.py         # 2D Joint Probability Heatmap & Sweet Spots module.
 │       ├── regime_scoring.py         # Market regime scoring module.
 │       ├── regularized_linear.py     # Lasso/Ridge regularized linear module.
 │       ├── scipy.py                  # SciPy hypothesis testing module.
@@ -103,11 +107,15 @@
 └── tests/                            # Automated test suite.
     ├── test_alphalens_analysis.py    # Tests for alphalens module.
     ├── test_automl.py                # Tests for AutoML modules.
+    ├── test_cli_prune.py             # Tests for prune CLI command.
     ├── test_eda.py                   # Tests for EDA module.
+    ├── test_feature_pruner.py        # Tests for feature pruning engine.
     ├── test_feature_scoring_modules.py # Tests for feature selection modules.
     ├── test_html_reports.py          # Tests for HTML report rendering.
     ├── test_input_formats.py         # Tests for CLI, parquet, limit, full flag.
     ├── test_kmean.py                 # Tests for KMeans module.
+    ├── test_probability.py           # Tests for probability module.
+    ├── test_probability_2d.py        # Tests for probability_2d module.
     ├── test_signal_analysis.py       # Tests for signal analysis module.
     ├── test_time_series_scoring.py   # Tests for walk-forward scoring.
     ├── test_visual_regions.py        # Tests for visual regions module.
