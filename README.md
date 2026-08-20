@@ -109,7 +109,41 @@ fldataprofiler fit datasets/feature.parquet datasets/label.csv --module lightgbm
 
 ---
 
-## 4. Các Tham số Tùy chọn (CLI Options)
+## 4. Lọc và Trích xuất Dữ liệu Đặc trưng (`fldataprofiler prune`)
+
+Công cụ `fldataprofiler prune` cho phép tự động loại bỏ các feature kém chất lượng, dư thừa và đa cộng tuyến để trích xuất ra một dataset sạch (`selected_feature.parquet` hoặc `selected_feature.csv`):
+
+```bash
+# 1. Lọc cơ bản (Loại bỏ null > 20%, low-variance và tương quan đa cộng tuyến |corr| > 0.85)
+fldataprofiler prune datasets/feature.parquet
+
+# 2. Tùy chỉnh ngưỡng correlation và đường dẫn file output
+fldataprofiler prune datasets/feature.parquet -o datasets/selected_feature.parquet --max-corr 0.80
+
+# 3. Lọc thông minh kết hợp file điểm profiling (ưu tiên giữ lại feature có điểm cao hơn khi bị trùng lặp) và cắt Top-K
+fldataprofiler prune datasets/feature.parquet \
+  --output datasets/selected_feature.parquet \
+  --max-corr 0.85 \
+  --max-null 0.10 \
+  --scores-file reports/xgboost/feature_scores.csv \
+  --top-k 30
+```
+
+### Các tham số tùy chọn của `prune`:
+* `-o, --output <đường_dẫn>`: Đường dẫn lưu file dataset đã lọc (mặc định: `datasets/selected_feature.parquet` hoặc `.csv`).
+* `--max-corr <float>`: Ngưỡng tương quan tối đa (mặc định: `0.85`).
+* `--corr-method <pearson|spearman>`: Phương pháp tính tương quan (mặc định: `pearson`).
+* `--max-null <float>`: Tỷ lệ giá trị thiếu tối đa cho phép (mặc định: `0.20`).
+* `--min-variance <float>`: Ngưỡng phương sai tối thiểu để loại bỏ feature hằng số (mặc định: `0.0`).
+* `--scores-file <đường_dẫn>`: File CSV điểm quan trọng (từ các module profiling) để ưu tiên giữ feature tốt hơn khi đa cộng tuyến.
+* `--score-col <tên_cột>`: Tên cột điểm trong file score (tự động nhận diện nếu để trống).
+* `--top-k <N>`: Giới hạn số lượng feature tối đa giữ lại.
+* `--keep-col <tên_cột>`: Tên cột luôn giữ lại không bao giờ bị loại bỏ (có thể truyền nhiều lần).
+* `--summary-json <đường_dẫn>`: Đường dẫn lưu file JSON ghi vết lý do loại bỏ từng cột (mặc định: `reports/prune_summary.json`).
+
+---
+
+## 5. Các Tham số Tùy chọn cho Lệnh `fit` (CLI Options)
 
 * `--full`: Chạy phân tích trên **toàn bộ 100% dữ liệu** mà không thực hiện lấy mẫu rút gọn (vô hiệu hóa cơ chế internal subsampling 20k rows ở các module ML).
 * `--target <cột_nhãn>`: Chỉ định cột nhãn cụ thể cần phân tích (có thể truyền nhiều lần).
@@ -129,7 +163,7 @@ fldataprofiler fit datasets/feature.parquet datasets/label.csv \
 
 ---
 
-## 5. Danh sách Kết quả Đầu ra (Artifacts)
+## 6. Danh sách Kết quả Đầu ra (Artifacts)
 
 Mỗi module khi hoàn thành sẽ lưu báo cáo và dữ liệu thống kê vào thư mục `reports/<module>/`:
 
@@ -140,7 +174,7 @@ Mỗi module khi hoàn thành sẽ lưu báo cáo và dữ liệu thống kê v�
 
 ---
 
-## 6. Tài liệu Chi tiết Từng Module
+## 7. Tài liệu Chi tiết Từng Module
 
 Xem hướng dẫn chi tiết, nguyên lý toán học và cấu trúc dữ liệu cho từng module tại thư mục [`docs/`](docs/README.md):
 
