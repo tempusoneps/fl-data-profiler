@@ -10,6 +10,7 @@ import pandas as pd
 import statsmodels.api as sm
 
 from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -51,6 +52,9 @@ class StatsmodelsRunMetadata:
 class StatsmodelsRelationshipsModule:
     name = "statsmodels"
 
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
+
     def run(
         self,
         feature_csv: Path,
@@ -60,64 +64,68 @@ class StatsmodelsRelationshipsModule:
         targets: list[str] | None = None,
     ) -> ModuleResult:
         start_time = time.perf_counter()
-        features = _read_table_with_date_index(feature_csv)
-        labels = _read_table_with_date_index(label_csv)
-        merged, feature_columns, label_columns, join_strategy = _merge_inputs(
-            features, labels, join_key
-        )
+        with ModuleProgress(self.name, total=3, enabled=self.progress) as progress_bar:
+            features = _read_table_with_date_index(feature_csv)
+            labels = _read_table_with_date_index(label_csv)
+            merged, feature_columns, label_columns, join_strategy = _merge_inputs(
+                features, labels, join_key
+            )
 
-        ignored_columns = _date_columns([*feature_columns, *label_columns])
-        feature_columns = [column for column in feature_columns if column not in ignored_columns]
-        label_columns = [column for column in label_columns if column not in ignored_columns]
-        selected_targets = _select_targets(label_columns, targets)
+            ignored_columns = _date_columns([*feature_columns, *label_columns])
+            feature_columns = [column for column in feature_columns if column not in ignored_columns]
+            label_columns = [column for column in label_columns if column not in ignored_columns]
+            selected_targets = _select_targets(label_columns, targets)
 
-        model_frame = _sample_rows(
-            merged[[*feature_columns, *selected_targets]], MAX_ROWS, RANDOM_STATE
-        )
-        model_results, coefficients = _fit_ols_models(
-            model_frame, feature_columns, selected_targets
-        )
+            model_frame = _sample_rows(
+                merged[[*feature_columns, *selected_targets]], MAX_ROWS, RANDOM_STATE
+            )
+            run_dir = output_dir / self.name
+            run_dir.mkdir(parents=True, exist_ok=True)
+            progress_bar.step("load")
 
-        run_dir = output_dir / self.name
-        run_dir.mkdir(parents=True, exist_ok=True)
+            model_results, coefficients = _fit_ols_models(
+                model_frame, feature_columns, selected_targets
+            )
+            progress_bar.step("fit_models")
 
-        metadata = StatsmodelsRunMetadata(
-            module=self.name,
-            created_at=datetime.now(UTC).isoformat(),
-            execution_time=_format_duration(time.perf_counter() - start_time),
-            feature_csv=str(feature_csv),
-            label_csv=str(label_csv),
-            join_strategy=join_strategy,
-            feature_shape=DatasetShape(*features.shape),
-            label_shape=DatasetShape(*labels.shape),
-            merged_shape=DatasetShape(*merged.shape),
-            model_rows=len(model_frame),
-            max_features_per_label=MAX_FEATURES_PER_LABEL,
-            targets=selected_targets,
-            ignored_columns=ignored_columns,
-        )
+            metadata = StatsmodelsRunMetadata(
+                module=self.name,
+                created_at=datetime.now(UTC).isoformat(),
+                execution_time=_format_duration(time.perf_counter() - start_time),
+                feature_csv=str(feature_csv),
+                label_csv=str(label_csv),
+                join_strategy=join_strategy,
+                feature_shape=DatasetShape(*features.shape),
+                label_shape=DatasetShape(*labels.shape),
+                merged_shape=DatasetShape(*merged.shape),
+                model_rows=len(model_frame),
+                max_features_per_label=MAX_FEATURES_PER_LABEL,
+                targets=selected_targets,
+                ignored_columns=ignored_columns,
+            )
 
-        artifacts = [
-            _write_json(
-                run_dir / "summary.json",
-                {
-                    "metadata": asdict(metadata),
-                    "model_results": model_results.to_dict(orient="records"),
-                    "top_coefficients": coefficients.head(100).to_dict(orient="records"),
-                },
-            ),
-            _write_csv(run_dir / "scores.csv", model_results),
-            _write_csv(run_dir / "coefficients.csv", coefficients),
-        ]
+            artifacts = [
+                _write_json(
+                    run_dir / "summary.json",
+                    {
+                        "metadata": asdict(metadata),
+                        "model_results": model_results.to_dict(orient="records"),
+                        "top_coefficients": coefficients.head(100).to_dict(orient="records"),
+                    },
+                ),
+                _write_csv(run_dir / "scores.csv", model_results),
+                _write_csv(run_dir / "coefficients.csv", coefficients),
+            ]
 
-        markdown = _render_markdown(metadata, model_results, coefficients)
-        md_path = run_dir / "report.md"
-        md_path.write_text(markdown, encoding="utf-8")
-        artifacts.append(md_path)
+            markdown = _render_markdown(metadata, model_results, coefficients)
+            md_path = run_dir / "report.md"
+            md_path.write_text(markdown, encoding="utf-8")
+            artifacts.append(md_path)
 
-        html_path = run_dir / "report.html"
-        html_path.write_text(_render_html(markdown, model_results, coefficients), encoding="utf-8")
-        artifacts.append(html_path)
+            html_path = run_dir / "report.html"
+            html_path.write_text(_render_html(markdown, model_results, coefficients), encoding="utf-8")
+            artifacts.append(html_path)
+            progress_bar.step("artifacts")
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
 
