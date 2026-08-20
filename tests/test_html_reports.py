@@ -127,8 +127,36 @@ class HtmlReportTests(unittest.TestCase):
             self.assertFalse(progress.kwargs["disable"])
             self.assertEqual(progress.kwargs["total"], sum(progress.updates))
 
+    def test_statistics_heatmap_top_features_selection(self) -> None:
+        import pandas as pd
 
+        from fldataprofiler.modules.statistics import _select_top_heatmap_features
+
+        # Create sample correlations with 50 features and 2 labels
+        rows = []
+        for i in range(50):
+            rows.append({
+                "feature": f"f_{i}",
+                "label": "label_1",
+                "pearson_correlation": 0.01 * (i + 1),
+                "abs_correlation": 0.01 * (i + 1),
+            })
+            rows.append({
+                "feature": f"f_{i}",
+                "label": "label_2",
+                "pearson_correlation": -0.005 * (50 - i),
+                "abs_correlation": 0.005 * (50 - i),
+            })
+        df = pd.DataFrame(rows)
+
+        # Select top-k per label (top 5 per label, max 8)
+        selected = _select_top_heatmap_features(df, top_k_per_label=5, max_total=8)
+        self.assertLessEqual(len(selected), 8)
+        # Should include top features for label_1 (e.g. f_49, f_48) and label_2 (f_0, f_1)
+        self.assertIn("f_49", selected)
+        self.assertIn("f_0", selected)
 
 
 if __name__ == "__main__":
     unittest.main()
+
