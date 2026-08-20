@@ -38,10 +38,22 @@ fldataprofiler fit datasets/feature.parquet datasets/label.csv \
 fldataprofiler fit datasets/feature.parquet datasets/label.csv --module visual_regions
 ```
 
+### Feature Pruning Command (`prune`)
+```bash
+# 1. Basic pruning (drops null > 20%, low-variance, and collinear |corr| > 0.85)
+fldataprofiler prune datasets/feature.parquet
+
+# 2. Score-guided pruning with custom output and top-K
+fldataprofiler prune datasets/feature.parquet \
+  -o datasets/selected_feature.parquet \
+  --max-corr 0.80 \
+  --scores-file reports/xgboost/feature_scores.csv \
+  --top-k 30
+```
+
 ## 2. Using the Python API
 
-You can also run modules programmatically in Python:
-
+### Profiling Execution
 ```python
 from pathlib import Path
 from fldataprofiler.registry import get_module
@@ -61,6 +73,22 @@ result = module.run(
 print(f"Report written to: {result.report_dir}")
 for artifact in result.artifacts:
     print(f"- {artifact}")
+```
+
+### Feature Pruning Programmatic API
+```python
+import pandas as pd
+from fldataprofiler.feature_pruner import PruneConfig, prune_features, load_scores
+
+df = pd.read_parquet("datasets/feature.parquet")
+scores = load_scores(Path("reports/xgboost/feature_scores.csv"))
+
+config = PruneConfig(max_corr=0.85, max_null=0.20, min_variance=0.0, top_k=30)
+result = prune_features(df, config=config, scores=scores)
+
+# Save cleaned dataframe
+result.df_selected.to_parquet("datasets/selected_feature.parquet", index=False)
+print(f"Retained {len(result.retained_features)} features")
 ```
 
 ## 3. Running Profiling Modules via Script

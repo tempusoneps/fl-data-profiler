@@ -58,7 +58,8 @@
 ├── src/                             # Python package source root.
 │   └── fldataprofiler/               # Main package module.
 │       ├── __init__.py               # Package exports.
-│       ├── cli.py                    # CLI argument parser and entry point.
+│       ├── cli.py                    # CLI argument parser and entry point (fit & prune).
+│       ├── feature_pruner.py         # Feature pruning & multicollinearity engine.
 │       ├── registry.py               # Module registry and factory.
 │       ├── utils.py                  # Data ingestion, indexing, and rendering helpers.
 │   │

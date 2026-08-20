@@ -77,6 +77,11 @@ def _read_table(path: Path) -> pd.DataFrame:
     return frame
 
 
+def load_dataframe(path: Path) -> pd.DataFrame:
+    """Load a DataFrame from a .csv or .parquet file."""
+    return _read_table(path)
+
+
 def _read_table_with_date_index(path: Path) -> pd.DataFrame:
     frame = _read_table(path)
     if "Date" in frame.columns:
