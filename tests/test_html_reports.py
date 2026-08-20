@@ -64,6 +64,70 @@ class HtmlReportTests(unittest.TestCase):
                     metadata = summary.get("metadata", summary)
                     self.assertIn("execution_time", metadata)
 
+    def test_all_core_modules_support_progress(self) -> None:
+        import tempfile
+        from unittest.mock import patch
+
+        import pandas as pd
+
+        from fldataprofiler.registry import get_module
+
+        class FakeTqdm:
+            def __init__(self, *args, **kwargs) -> None:
+                self.args = args
+                self.kwargs = kwargs
+                self.updates: list[int] = []
+
+            def __enter__(self) -> FakeTqdm:
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                pass
+
+            def set_postfix_str(self, label: str) -> None:
+                pass
+
+            def update(self, n: int = 1) -> None:
+                self.updates.append(n)
+
+        progress_instances: list[FakeTqdm] = []
+
+        def fake_tqdm(*args, **kwargs):
+            instance = FakeTqdm(*args, **kwargs)
+            progress_instances.append(instance)
+            return instance
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            feat_csv = tmp_path / "feat.csv"
+            label_csv = tmp_path / "label.csv"
+            out_dir = tmp_path / "out"
+
+            df_feat = pd.DataFrame({
+                "Date": pd.date_range("2024-01-01", periods=60, freq="1h"),
+                "feat_a": range(60),
+                "feat_b": range(60, 120),
+            })
+            df_label = pd.DataFrame({
+                "Date": pd.date_range("2024-01-01", periods=60, freq="1h"),
+                "target": [0, 1] * 30,
+            })
+            df_feat.to_csv(feat_csv, index=False)
+            df_label.to_csv(label_csv, index=False)
+
+            with patch("fldataprofiler.modules.progress.tqdm", fake_tqdm):
+                for module_name in ["statistics", "scipy", "statsmodels", "sklearn", "boruta", "shap"]:
+                    mod = get_module(module_name)
+                    mod.progress = True
+                    mod.run(feature_csv=feat_csv, label_csv=label_csv, output_dir=out_dir)
+
+        self.assertEqual(6, len(progress_instances))
+        for progress in progress_instances:
+            self.assertGreaterEqual(progress.kwargs["total"], 3)
+            self.assertFalse(progress.kwargs["disable"])
+            self.assertEqual(progress.kwargs["total"], sum(progress.updates))
+
+
 
 
 if __name__ == "__main__":

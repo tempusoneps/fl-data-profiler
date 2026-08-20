@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.utils import (
     _format_duration,
     _html_markdown_details,
@@ -51,6 +52,9 @@ class RunMetadata:
 class StatisticsModule:
     name = "statistics"
 
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
+
     def run(
         self,
         feature_csv: Path,
@@ -60,62 +64,67 @@ class StatisticsModule:
         targets: list[str] | None = None,
     ) -> ModuleResult:
         start_time = time.perf_counter()
-        features = _read_table_with_date_index(feature_csv)
-        labels = _read_table_with_date_index(label_csv)
-        merged, feature_columns, label_columns, join_strategy = _merge_inputs(
-            features, labels, join_key
-        )
+        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+            features = _read_table_with_date_index(feature_csv)
+            labels = _read_table_with_date_index(label_csv)
+            merged, feature_columns, label_columns, join_strategy = _merge_inputs(
+                features, labels, join_key
+            )
 
-        selected_targets = _select_targets(label_columns, targets)
-        run_dir = output_dir / self.name
-        run_dir.mkdir(parents=True, exist_ok=True)
+            selected_targets = _select_targets(label_columns, targets)
+            run_dir = output_dir / self.name
+            run_dir.mkdir(parents=True, exist_ok=True)
+            progress_bar.step("load")
 
-        feature_profile = _profile_frame(merged[feature_columns])
-        label_profile = _profile_frame(merged[selected_targets])
-        correlations = _feature_label_correlations(merged, feature_columns, selected_targets)
-        target_summary = _target_summary(merged, feature_columns, selected_targets)
+            feature_profile = _profile_frame(merged[feature_columns])
+            label_profile = _profile_frame(merged[selected_targets])
+            correlations = _feature_label_correlations(merged, feature_columns, selected_targets)
+            target_summary = _target_summary(merged, feature_columns, selected_targets)
+            progress_bar.step("profile")
 
-        metadata = RunMetadata(
-            module=self.name,
-            created_at=datetime.now(UTC).isoformat(),
-            execution_time=_format_duration(time.perf_counter() - start_time),
-            feature_csv=str(feature_csv),
-            label_csv=str(label_csv),
-            join_strategy=join_strategy,
-            feature_shape=DatasetShape(*features.shape),
-            label_shape=DatasetShape(*labels.shape),
-            merged_shape=DatasetShape(*merged.shape),
-            targets=selected_targets,
-        )
+            heatmap_path = run_dir / "feature_label_correlation_heatmap.png"
+            _write_heatmap(heatmap_path, correlations)
+            progress_bar.step("heatmap")
 
-        artifacts = [
-            _write_json(
-                run_dir / "statistics_summary.json",
-                {
-                    "metadata": asdict(metadata),
-                    "feature_profile": feature_profile,
-                    "label_profile": label_profile,
-                    "target_summary": target_summary,
-                    "top_relationships": correlations.head(25).to_dict(orient="records"),
-                },
-            ),
-            _write_csv(run_dir / "feature_profile.csv", pd.DataFrame(feature_profile)),
-            _write_csv(run_dir / "label_profile.csv", pd.DataFrame(label_profile)),
-            _write_csv(run_dir / "feature_label_correlations.csv", correlations),
-        ]
+            metadata = RunMetadata(
+                module=self.name,
+                created_at=datetime.now(UTC).isoformat(),
+                execution_time=_format_duration(time.perf_counter() - start_time),
+                feature_csv=str(feature_csv),
+                label_csv=str(label_csv),
+                join_strategy=join_strategy,
+                feature_shape=DatasetShape(*features.shape),
+                label_shape=DatasetShape(*labels.shape),
+                merged_shape=DatasetShape(*merged.shape),
+                targets=selected_targets,
+            )
 
-        heatmap_path = run_dir / "feature_label_correlation_heatmap.png"
-        _write_heatmap(heatmap_path, correlations)
-        artifacts.append(heatmap_path)
+            artifacts = [
+                _write_json(
+                    run_dir / "statistics_summary.json",
+                    {
+                        "metadata": asdict(metadata),
+                        "feature_profile": feature_profile,
+                        "label_profile": label_profile,
+                        "target_summary": target_summary,
+                        "top_relationships": correlations.head(25).to_dict(orient="records"),
+                    },
+                ),
+                _write_csv(run_dir / "feature_profile.csv", pd.DataFrame(feature_profile)),
+                _write_csv(run_dir / "label_profile.csv", pd.DataFrame(label_profile)),
+                _write_csv(run_dir / "feature_label_correlations.csv", correlations),
+                heatmap_path,
+            ]
 
-        markdown = _render_markdown(metadata, feature_profile, label_profile, correlations)
-        md_path = run_dir / "report.md"
-        md_path.write_text(markdown, encoding="utf-8")
-        artifacts.append(md_path)
+            markdown = _render_markdown(metadata, feature_profile, label_profile, correlations)
+            md_path = run_dir / "report.md"
+            md_path.write_text(markdown, encoding="utf-8")
+            artifacts.append(md_path)
 
-        html_path = run_dir / "report.html"
-        html_path.write_text(_render_html(markdown, correlations), encoding="utf-8")
-        artifacts.append(html_path)
+            html_path = run_dir / "report.html"
+            html_path.write_text(_render_html(markdown, correlations), encoding="utf-8")
+            artifacts.append(html_path)
+            progress_bar.step("artifacts")
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
 
@@ -223,7 +232,43 @@ def _means_by_label_quantile(
     return result
 
 
-def _write_heatmap(path: Path, correlations: pd.DataFrame) -> None:
+MAX_HEATMAP_FEATURES_PER_LABEL = 10
+MAX_TOTAL_HEATMAP_FEATURES = 30
+
+
+def _select_top_heatmap_features(
+    correlations: pd.DataFrame,
+    top_k_per_label: int = MAX_HEATMAP_FEATURES_PER_LABEL,
+    max_total: int = MAX_TOTAL_HEATMAP_FEATURES,
+) -> list[str]:
+    if correlations.empty:
+        return []
+
+    unique_features = correlations["feature"].unique()
+    if len(unique_features) <= max_total:
+        max_abs = correlations.groupby("feature")["abs_correlation"].max()
+        return list(max_abs.sort_values(ascending=False).index)
+
+    # Union of Top-K features per label
+    selected_features: set[str] = set()
+    for _, group in correlations.groupby("label"):
+        top_in_group = group.sort_values("abs_correlation", ascending=False).head(top_k_per_label)
+        selected_features.update(top_in_group["feature"].tolist())
+
+    # Rank the selected union by maximum absolute correlation across all labels
+    filtered_corrs = correlations[correlations["feature"].isin(selected_features)]
+    max_abs = filtered_corrs.groupby("feature")["abs_correlation"].max()
+    ranked_features = list(max_abs.sort_values(ascending=False).index)
+
+    return ranked_features[:max_total]
+
+
+def _write_heatmap(
+    path: Path,
+    correlations: pd.DataFrame,
+    top_k_per_label: int = MAX_HEATMAP_FEATURES_PER_LABEL,
+    max_total: int = MAX_TOTAL_HEATMAP_FEATURES,
+) -> None:
     if correlations.empty:
         fig, ax = plt.subplots(figsize=(8, 3))
         ax.text(0.5, 0.5, "No numeric feature/label correlations", ha="center", va="center")
@@ -233,16 +278,30 @@ def _write_heatmap(path: Path, correlations: pd.DataFrame) -> None:
         plt.close(fig)
         return
 
-    pivot = correlations.pivot(
-        index="feature", columns="label", values="pearson_correlation"
-    ).fillna(0)
-    height = max(3, min(12, 0.45 * len(pivot.index) + 1.5))
-    width = max(5, min(14, 1.2 * len(pivot.columns) + 4))
+    top_features = _select_top_heatmap_features(correlations, top_k_per_label, max_total)
+    plot_df = correlations[correlations["feature"].isin(top_features)]
+
+    pivot = (
+        plot_df.pivot(index="feature", columns="label", values="pearson_correlation")
+        .reindex(index=top_features)
+        .fillna(0)
+    )
+
+    height = max(3.5, min(14.0, 0.38 * len(pivot.index) + 1.8))
+    width = max(5.5, min(14.0, 1.2 * len(pivot.columns) + 4.5))
     fig, ax = plt.subplots(figsize=(width, height))
     image = ax.imshow(pivot.values, cmap="coolwarm", aspect="auto", vmin=-1, vmax=1)
     ax.set_xticks(np.arange(len(pivot.columns)), labels=pivot.columns, rotation=35, ha="right")
     ax.set_yticks(np.arange(len(pivot.index)), labels=pivot.index)
-    ax.set_title("Feature / label Pearson correlation")
+
+    total_features_count = correlations["feature"].nunique()
+    if len(top_features) < total_features_count:
+        ax.set_title(
+            f"Feature / Label Pearson Correlation (Top {len(top_features)} of {total_features_count} Features)"
+        )
+    else:
+        ax.set_title("Feature / Label Pearson Correlation")
+
     fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
     fig.savefig(path, dpi=160)

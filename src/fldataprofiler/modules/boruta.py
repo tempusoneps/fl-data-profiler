@@ -22,6 +22,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -40,11 +41,11 @@ from fldataprofiler.utils import (
     _write_json,
 )
 
-MAX_ROWS = 10_000
+MAX_ROWS = 20_000
 MAX_CLASS_COUNT = 50
-RANDOM_STATE = 42
-BORUTA_ITERATIONS = 30
+BORUTA_ITERATIONS = 40
 P_VALUE = 0.05
+RANDOM_STATE = 42
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,9 @@ class BorutaRunMetadata:
 class BorutaRelationshipsModule:
     name = "boruta"
 
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
+
     def run(
         self,
         feature_csv: Path,
@@ -78,69 +82,73 @@ class BorutaRelationshipsModule:
         targets: list[str] | None = None,
     ) -> ModuleResult:
         start_time = time.perf_counter()
-        features = _read_table_with_date_index(feature_csv)
-        labels = _read_table_with_date_index(label_csv)
-        merged, feature_columns, label_columns, join_strategy = _merge_inputs(
-            features, labels, join_key
-        )
+        with ModuleProgress(self.name, total=3, enabled=self.progress) as progress_bar:
+            features = _read_table_with_date_index(feature_csv)
+            labels = _read_table_with_date_index(label_csv)
+            merged, feature_columns, label_columns, join_strategy = _merge_inputs(
+                features, labels, join_key
+            )
 
-        ignored_columns = _date_columns([*feature_columns, *label_columns])
-        feature_columns = [column for column in feature_columns if column not in ignored_columns]
-        label_columns = [column for column in label_columns if column not in ignored_columns]
-        selected_targets = _select_targets(label_columns, targets)
-        numeric_features = _numeric_feature_columns(merged, feature_columns)
+            ignored_columns = _date_columns([*feature_columns, *label_columns])
+            feature_columns = [column for column in feature_columns if column not in ignored_columns]
+            label_columns = [column for column in label_columns if column not in ignored_columns]
+            selected_targets = _select_targets(label_columns, targets)
+            numeric_features = _numeric_feature_columns(merged, feature_columns)
 
-        model_frame = _sample_rows(
-            merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
-        )
-        model_results, selections = _fit_target_models(
-            model_frame,
-            numeric_features,
-            selected_targets,
-        )
+            model_frame = _sample_rows(
+                merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
+            )
+            run_dir = output_dir / self.name
+            run_dir.mkdir(parents=True, exist_ok=True)
+            progress_bar.step("load")
 
-        run_dir = output_dir / self.name
-        run_dir.mkdir(parents=True, exist_ok=True)
+            model_results, selections = _fit_target_models(
+                model_frame,
+                numeric_features,
+                selected_targets,
+            )
+            progress_bar.step("fit_models")
 
-        metadata = BorutaRunMetadata(
-            module=self.name,
-            created_at=datetime.now(UTC).isoformat(),
-            execution_time=_format_duration(time.perf_counter() - start_time),
-            feature_csv=str(feature_csv),
-            label_csv=str(label_csv),
-            join_strategy=join_strategy,
-            feature_shape=DatasetShape(*features.shape),
-            label_shape=DatasetShape(*labels.shape),
-            merged_shape=DatasetShape(*merged.shape),
-            model_rows=len(model_frame),
-            features=numeric_features,
-            targets=selected_targets,
-            ignored_columns=ignored_columns,
-            iterations=BORUTA_ITERATIONS,
-            p_value=P_VALUE,
-        )
+            metadata = BorutaRunMetadata(
+                module=self.name,
+                created_at=datetime.now(UTC).isoformat(),
+                execution_time=_format_duration(time.perf_counter() - start_time),
+                feature_csv=str(feature_csv),
+                label_csv=str(label_csv),
+                join_strategy=join_strategy,
+                feature_shape=DatasetShape(*features.shape),
+                label_shape=DatasetShape(*labels.shape),
+                merged_shape=DatasetShape(*merged.shape),
+                model_rows=len(model_frame),
+                features=numeric_features,
+                targets=selected_targets,
+                ignored_columns=ignored_columns,
+                iterations=BORUTA_ITERATIONS,
+                p_value=P_VALUE,
+            )
 
-        artifacts = [
-            _write_json(
-                run_dir / "summary.json",
-                {
-                    "metadata": asdict(metadata),
-                    "model_results": model_results.to_dict(orient="records"),
-                    "top_selected_features": selections.head(100).to_dict(orient="records"),
-                },
-            ),
-            _write_csv(run_dir / "scores.csv", model_results),
-            _write_csv(run_dir / "boruta_features.csv", selections),
-        ]
+            artifacts = [
+                _write_json(
+                    run_dir / "summary.json",
+                    {
+                        "metadata": asdict(metadata),
+                        "model_results": model_results.to_dict(orient="records"),
+                        "top_selected_features": selections.head(100).to_dict(orient="records"),
+                    },
+                ),
+                _write_csv(run_dir / "scores.csv", model_results),
+                _write_csv(run_dir / "boruta_features.csv", selections),
+            ]
 
-        markdown = _render_markdown(metadata, model_results, selections)
-        md_path = run_dir / "report.md"
-        md_path.write_text(markdown, encoding="utf-8")
-        artifacts.append(md_path)
+            markdown = _render_markdown(metadata, model_results, selections)
+            md_path = run_dir / "report.md"
+            md_path.write_text(markdown, encoding="utf-8")
+            artifacts.append(md_path)
 
-        html_path = run_dir / "report.html"
-        html_path.write_text(_render_html(markdown, model_results, selections), encoding="utf-8")
-        artifacts.append(html_path)
+            html_path = run_dir / "report.html"
+            html_path.write_text(_render_html(markdown, model_results, selections), encoding="utf-8")
+            artifacts.append(html_path)
+            progress_bar.step("artifacts")
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
 

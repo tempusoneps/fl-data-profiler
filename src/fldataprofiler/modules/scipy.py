@@ -11,6 +11,7 @@ import pandas as pd
 from scipy import linalg, stats
 
 from fldataprofiler.modules.base import ModuleResult
+from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -46,6 +47,9 @@ class ScipyRunMetadata:
 class ScipyRelationshipsModule:
     name = "scipy"
 
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
+
     def run(
         self,
         feature_csv: Path,
@@ -55,59 +59,65 @@ class ScipyRelationshipsModule:
         targets: list[str] | None = None,
     ) -> ModuleResult:
         start_time = time.perf_counter()
-        features = _read_table_with_date_index(feature_csv)
-        labels = _read_table_with_date_index(label_csv)
-        merged, feature_columns, label_columns, join_strategy = _merge_inputs(
-            features, labels, join_key
-        )
+        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+            features = _read_table_with_date_index(feature_csv)
+            labels = _read_table_with_date_index(label_csv)
+            merged, feature_columns, label_columns, join_strategy = _merge_inputs(
+                features, labels, join_key
+            )
 
-        ignored_columns = _date_columns([*feature_columns, *label_columns])
-        feature_columns = [column for column in feature_columns if column not in ignored_columns]
-        label_columns = [column for column in label_columns if column not in ignored_columns]
-        selected_targets = _select_targets(label_columns, targets)
+            ignored_columns = _date_columns([*feature_columns, *label_columns])
+            feature_columns = [column for column in feature_columns if column not in ignored_columns]
+            label_columns = [column for column in label_columns if column not in ignored_columns]
+            selected_targets = _select_targets(label_columns, targets)
 
-        run_dir = output_dir / self.name
-        run_dir.mkdir(parents=True, exist_ok=True)
+            run_dir = output_dir / self.name
+            run_dir.mkdir(parents=True, exist_ok=True)
+            progress_bar.step("load")
 
-        pairwise = _pairwise_tests(merged, feature_columns, selected_targets)
-        combined = _combined_two_feature_tests(merged, feature_columns, selected_targets)
+            pairwise = _pairwise_tests(merged, feature_columns, selected_targets)
+            progress_bar.step("pairwise_tests")
 
-        metadata = ScipyRunMetadata(
-            module=self.name,
-            created_at=datetime.now(UTC).isoformat(),
-            execution_time=_format_duration(time.perf_counter() - start_time),
-            feature_csv=str(feature_csv),
-            label_csv=str(label_csv),
-            join_strategy=join_strategy,
-            feature_shape=DatasetShape(*features.shape),
-            label_shape=DatasetShape(*labels.shape),
-            merged_shape=DatasetShape(*merged.shape),
-            features=feature_columns,
-            targets=selected_targets,
-            ignored_columns=ignored_columns,
-        )
+            combined = _combined_two_feature_tests(merged, feature_columns, selected_targets)
+            progress_bar.step("combined_tests")
 
-        artifacts = [
-            _write_json(
-                run_dir / "summary.json",
-                {
-                    "metadata": asdict(metadata),
-                    "top_pairwise_relationships": pairwise.head(50).to_dict(orient="records"),
-                    "combined_two_feature_tests": combined.to_dict(orient="records"),
-                },
-            ),
-            _write_csv(run_dir / "pairwise.csv", pairwise),
-            _write_csv(run_dir / "two_feature.csv", combined),
-        ]
+            metadata = ScipyRunMetadata(
+                module=self.name,
+                created_at=datetime.now(UTC).isoformat(),
+                execution_time=_format_duration(time.perf_counter() - start_time),
+                feature_csv=str(feature_csv),
+                label_csv=str(label_csv),
+                join_strategy=join_strategy,
+                feature_shape=DatasetShape(*features.shape),
+                label_shape=DatasetShape(*labels.shape),
+                merged_shape=DatasetShape(*merged.shape),
+                features=feature_columns,
+                targets=selected_targets,
+                ignored_columns=ignored_columns,
+            )
 
-        markdown = _render_markdown(metadata, pairwise, combined)
-        md_path = run_dir / "report.md"
-        md_path.write_text(markdown, encoding="utf-8")
-        artifacts.append(md_path)
+            artifacts = [
+                _write_json(
+                    run_dir / "summary.json",
+                    {
+                        "metadata": asdict(metadata),
+                        "top_pairwise_relationships": pairwise.head(50).to_dict(orient="records"),
+                        "combined_two_feature_tests": combined.to_dict(orient="records"),
+                    },
+                ),
+                _write_csv(run_dir / "pairwise.csv", pairwise),
+                _write_csv(run_dir / "two_feature.csv", combined),
+            ]
 
-        html_path = run_dir / "report.html"
-        html_path.write_text(_render_html(markdown, pairwise, combined), encoding="utf-8")
-        artifacts.append(html_path)
+            markdown = _render_markdown(metadata, pairwise, combined)
+            md_path = run_dir / "report.md"
+            md_path.write_text(markdown, encoding="utf-8")
+            artifacts.append(md_path)
+
+            html_path = run_dir / "report.html"
+            html_path.write_text(_render_html(markdown, pairwise, combined), encoding="utf-8")
+            artifacts.append(html_path)
+            progress_bar.step("artifacts")
 
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
 
