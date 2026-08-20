@@ -16,6 +16,8 @@ fl-data-profiling
 │
 ├── 2. Phân tích Tín hiệu & Nhân tố Tài chính (Alpha & Factor Analysis)
 │   ├── alphalens                : Factor tearsheet, Quantile returns, IC decay, Long-Short spread
+│   ├── probability              : Phân tích xác suất điều kiện 20 quantiles, Information Value (IV) & WoE
+│   ├── probability_2d           : Ma trận nhiệt xác suất kết hợp 2D (10x10 grid), Synergy Gain & Sweet Spots
 │   ├── information_coefficient  : Walk-forward IC (Pearson & Spearman Rank IC) chuỗi thời gian
 │   ├── signal_analysis          : Đánh giá tín hiệu đơn lẻ, ma trận dư thừa & tín hiệu kết hợp
 │   └── regime_scoring           : Đánh giá sức mạnh đặc trưng theo từng chế độ thị trường
@@ -53,6 +55,8 @@ fl-data-profiling
 | Tên Lệnh CLI (`--module`) | File Tài liệu Chi tiết | Loại Phân tích | Trường hợp Sử dụng Chính |
 | :--- | :--- | :--- | :--- |
 | `alphalens` | [`alphalens.md`](alphalens.md) | Factor Research | Đánh giá factor tearsheet, IC decay, phân tầng quantile, long-short spread |
+| `probability` | [`probability.md`](probability.md) | Probabilistic | Phân tích xác suất điều kiện 20 quantiles, Information Value (IV), WoE, Monotonicity |
+| `probability_2d` (hoặc `probability2d`) | [`probability_2d.md`](probability_2d.md) | Joint Probability | Ma trận nhiệt xác suất kết hợp 2D (10x10 grid), Synergy Gain & Sweet Spots |
 | `eda` | [`eda.md`](eda.md) | Data Profiling | Kiểm tra missingness, phân phối, kiểu dữ liệu, correlation heatmaps |
 | `statistics` | [`statistics.md`](statistics.md) | Descriptive Stats | Tương quan tuyến tính Pearson, thống kê mô tả, quantile profile |
 | `scipy` | [`scipy.md`](scipy.md) | Hypothesis Testing | Kiểm định p-value nghiêm ngặt (t-test, ANOVA, Kruskal, Chi-square, effect size) |

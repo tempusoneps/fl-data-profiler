@@ -16,6 +16,8 @@ from fldataprofiler.modules.mutual_information import MutualInformationModule
 from fldataprofiler.modules.permutation_importance_ts import (
     PermutationImportanceTSModule,
 )
+from fldataprofiler.modules.probability import ProbabilityModule
+from fldataprofiler.modules.probability_2d import Probability2DModule
 from fldataprofiler.modules.regime_scoring import RegimeScoringModule
 from fldataprofiler.modules.regularized_linear import RegularizedLinearModule
 from fldataprofiler.modules.scipy import ScipyRelationshipsModule
@@ -43,6 +45,9 @@ _MODULES: dict[str, ProfilingModule] = {
     "mrmr": MRMRModule(),
     "mutual_information": MutualInformationModule(),
     "permutation_importance_ts": PermutationImportanceTSModule(),
+    "probability": ProbabilityModule(),
+    "probability_2d": Probability2DModule(),
+    "probability2d": Probability2DModule(),
     "pycaret": PyCaretRelationshipsModule(),
     "regime_scoring": RegimeScoringModule(),
     "regularized_linear": RegularizedLinearModule(),

@@ -40,6 +40,8 @@ FAST_MODULES=(
   "signal_analysis"
   "regime_scoring"
   "alphalens"
+  "probability"
+  "probability_2d"
   "kmean"
   "visual_regions"
   "sklearn"

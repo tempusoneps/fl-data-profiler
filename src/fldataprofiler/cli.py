@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
+import pandas as pd
+
 from fldataprofiler.feature_pruner import PruneConfig, load_scores, prune_features
 from fldataprofiler.registry import get_module, list_modules
 from fldataprofiler.utils import (
@@ -117,10 +119,14 @@ def _run_prune_command(args: argparse.Namespace) -> int:
     if output_path.parent != Path(""):
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    save_index = bool(
+        result.df_selected.index.name is not None
+        or not isinstance(result.df_selected.index, pd.RangeIndex)
+    )
     if output_path.suffix.lower() == ".parquet":
-        result.df_selected.to_parquet(output_path, index=False)
+        result.df_selected.to_parquet(output_path, index=save_index)
     else:
-        result.df_selected.to_csv(output_path, index=False)
+        result.df_selected.to_csv(output_path, index=save_index)
 
     summary_path = args.summary_json or (Path("reports") / "prune_summary.json")
     if summary_path.parent != Path(""):
