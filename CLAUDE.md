@@ -137,6 +137,10 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
 │   ├── permutation_importance_ts.md  # Time-series permutation importance docs.
 │   ├── probability.md                # 20-bin Quantile Conditional Probability & WoE/IV docs.
 │   ├── probability_2d.md             # 2D Joint Probability Heatmap & Sweet Spots docs.
+│   ├── probability_3d.md             # 3D Joint Probability & Hyper Sweet Spots docs.
+│   ├── probability_bayes.md          # Bayesian Probability & Credible Intervals docs.
+│   ├── probability_drift.md          # Probability drift, PSI & Alpha stability docs.
+│   ├── probability_kellycriterion.md # Kelly Criterion & Position Sizing docs.
 │   ├── pycaret.md                    # PyCaret AutoML documentation.
 │   ├── regime_scoring.md             # Regime-based feature scoring documentation.
 │   ├── regularized_linear.md         # Regularized linear regression docs.
@@ -164,7 +168,7 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
 │       ├── registry.py               # Module registry and factory.
 │       ├── utils.py                  # Data ingestion, indexing, and rendering helpers.
 │   │
-│   └── modules/                      # 27 Profiling Module Implementations.
+│   └── modules/                      # 29 Profiling Module Implementations.
 │       ├── __init__.py               # Module package marker.
 │       ├── base.py                   # ProfilingModule protocol & ModuleResult.
 │       ├── progress.py               # Shared progress reporting bar.
@@ -184,6 +188,10 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
 │       ├── permutation_importance_ts.py # Time-series permutation module.
 │       ├── probability.py            # 20-bin Quantile Conditional Probability & WoE/IV module.
 │       ├── probability_2d.py         # 2D Joint Probability Heatmap & Sweet Spots module.
+│       ├── probability_3d.py         # 3D Joint Probability & Hyper Sweet Spots module.
+│       ├── probability_bayes.py      # Bayesian Probability & Credible Intervals module.
+│       ├── probability_drift.py      # Probability drift, PSI & Alpha stability module.
+│       ├── probability_kellycriterion.py # Kelly Criterion & Position Sizing module.
 │       ├── regime_scoring.py         # Market regime scoring module.
 │       ├── regularized_linear.py     # Lasso/Ridge regularized linear module.
 │       ├── scipy.py                  # SciPy hypothesis testing module.
@@ -215,6 +223,10 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
     ├── test_kmean.py                 # Tests for KMeans module.
     ├── test_probability.py           # Tests for probability module.
     ├── test_probability_2d.py        # Tests for probability_2d module.
+    ├── test_probability_3d.py        # Tests for probability_3d module.
+    ├── test_probability_bayes.py     # Tests for probability_bayes module.
+    ├── test_probability_drift.py     # Tests for probability_drift module.
+    ├── test_probability_kellycriterion.py # Tests for probability_kellycriterion module.
     ├── test_signal_analysis.py       # Tests for signal analysis module.
     ├── test_time_series_scoring.py   # Tests for walk-forward scoring.
     ├── test_visual_regions.py        # Tests for visual regions module.
