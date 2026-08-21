@@ -1,10 +1,12 @@
 # Module Catalog
 
-`fl-data-profiling` provides 27 specialized profiling modules accessible via `--module <name>`:
+`fl-data-profiling` provides 29 specialized profiling modules accessible via `--module <name>`:
 
 ## 1. Factor & Signal Analysis
 - **`alphalens`**: Factor tearsheet analysis, forward return quantiles (Q1-Q5), IC decay ($t+1, t+5, t+15, t+60$), Information Ratio (IR), and long-short cumulative spread curve.
 - **`probability`**: 20-bin Quantile Conditional Probability distributions, Information Value (IV), Weight of Evidence (WoE), Probability Spread, Monotonicity, and Shannon Entropy.
+- **`probability_bayes`** (hoặc `probabilitybayes`): Bayesian Quantile Conditional Probability with Beta-Binomial / Dirichlet-Multinomial shrinkage, 95% Credible Intervals, Bayes Factor ($BF_{10}$), Bayes WoE/IV, and uncertainty bounds.
+- **`probability_kellycriterion`** (hoặc `probability_kelly`, `kelly`): Kelly Criterion position sizing ($f^*$, Half-Kelly, Quarter-Kelly), Expected Value ($EV$), Expected Capital Growth Rate, and action recommendations across 20 quantile bins.
 - **`probability_2d`** (hoặc `probability2d`): 2D Joint Probability Heatmaps on $10 \times 10$ quantile grids, 2D Information Value ($IV_{2D}$), Synergy Gain, and Sweet Spot Rule extraction.
 - **`probability_3d`** (hoặc `probability3d`): 3D Joint Probability Hyper-Voxels on $5 \times 5 \times 5$ quantile grids, 3-Way Synergy Gain, and 3D Hyper-Voxel Sweet Spot Rule extraction.
 - **`probability_drift`**: Time-series probability stability, Population Stability Index (PSI), IV alpha decay, and regime / monotonicity inversion checks across chronological time folds.

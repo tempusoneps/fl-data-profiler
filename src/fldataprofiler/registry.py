@@ -19,7 +19,11 @@ from fldataprofiler.modules.permutation_importance_ts import (
 from fldataprofiler.modules.probability import ProbabilityModule
 from fldataprofiler.modules.probability_2d import Probability2DModule
 from fldataprofiler.modules.probability_3d import Probability3DModule
+from fldataprofiler.modules.probability_bayes import ProbabilityBayesModule
 from fldataprofiler.modules.probability_drift import ProbabilityDriftModule
+from fldataprofiler.modules.probability_kellycriterion import (
+    ProbabilityKellyCriterionModule,
+)
 from fldataprofiler.modules.regime_scoring import RegimeScoringModule
 from fldataprofiler.modules.regularized_linear import RegularizedLinearModule
 from fldataprofiler.modules.scipy import ScipyRelationshipsModule
@@ -52,7 +56,14 @@ _MODULES: dict[str, ProfilingModule] = {
     "probability2d": Probability2DModule(),
     "probability_3d": Probability3DModule(),
     "probability3d": Probability3DModule(),
+    "probability_bayes": ProbabilityBayesModule(),
+    "probabilitybayes": ProbabilityBayesModule(),
     "probability_drift": ProbabilityDriftModule(),
+    "probability_kelly": ProbabilityKellyCriterionModule(),
+    "probability_kellycriterion": ProbabilityKellyCriterionModule(),
+    "probabilitykelly": ProbabilityKellyCriterionModule(),
+    "kelly": ProbabilityKellyCriterionModule(),
+    "kelly_criterion": ProbabilityKellyCriterionModule(),
     "pycaret": PyCaretRelationshipsModule(),
     "regime_scoring": RegimeScoringModule(),
     "regularized_linear": RegularizedLinearModule(),
