@@ -18,6 +18,8 @@ fl-data-profiling
 │   ├── alphalens                : Factor tearsheet, Quantile returns, IC decay, Long-Short spread
 │   ├── probability              : Phân tích xác suất điều kiện 20 quantiles, Information Value (IV) & WoE
 │   ├── probability_2d           : Ma trận nhiệt xác suất kết hợp 2D (10x10 grid), Synergy Gain & Sweet Spots
+│   ├── probability_3d           : Không gian xác suất kết hợp 3D (5x5x5 voxels), 3-Way Synergy & Hyper Sweet Spots
+│   ├── probability_drift        : Đánh giá độ ổn định xác suất chuỗi thời gian, PSI & Regime Inversions
 │   ├── information_coefficient  : Walk-forward IC (Pearson & Spearman Rank IC) chuỗi thời gian
 │   ├── signal_analysis          : Đánh giá tín hiệu đơn lẻ, ma trận dư thừa & tín hiệu kết hợp
 │   └── regime_scoring           : Đánh giá sức mạnh đặc trưng theo từng chế độ thị trường
@@ -57,6 +59,8 @@ fl-data-profiling
 | `alphalens` | [`alphalens.md`](alphalens.md) | Factor Research | Đánh giá factor tearsheet, IC decay, phân tầng quantile, long-short spread |
 | `probability` | [`probability.md`](probability.md) | Probabilistic | Phân tích xác suất điều kiện 20 quantiles, Information Value (IV), WoE, Monotonicity |
 | `probability_2d` (hoặc `probability2d`) | [`probability_2d.md`](probability_2d.md) | Joint Probability | Ma trận nhiệt xác suất kết hợp 2D (10x10 grid), Synergy Gain & Sweet Spots |
+| `probability_3d` (hoặc `probability3d`) | [`probability_3d.md`](probability_3d.md) | 3D Probability | Không gian xác suất kết hợp 3D (5x5x5 voxels), 3-Way Synergy & Hyper Sweet Spots |
+| `probability_drift` | [`probability_drift.md`](probability_drift.md) | Alpha Stability | Đánh giá độ ổn định xác suất chuỗi thời gian, PSI, IV Decay & Regime Flips |
 | `eda` | [`eda.md`](eda.md) | Data Profiling | Kiểm tra missingness, phân phối, kiểu dữ liệu, correlation heatmaps |
 | `statistics` | [`statistics.md`](statistics.md) | Descriptive Stats | Tương quan tuyến tính Pearson, thống kê mô tả, quantile profile |
 | `scipy` | [`scipy.md`](scipy.md) | Hypothesis Testing | Kiểm định p-value nghiêm ngặt (t-test, ANOVA, Kruskal, Chi-square, effect size) |

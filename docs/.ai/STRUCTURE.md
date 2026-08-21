@@ -38,6 +38,8 @@
 │   ├── permutation_importance_ts.md  # Time-series permutation importance docs.
 │   ├── probability.md                # 20-bin Quantile Conditional Probability & WoE/IV docs.
 │   ├── probability_2d.md             # 2D Joint Probability Heatmap & Sweet Spots docs.
+│   ├── probability_3d.md             # 3D Joint Probability & Hyper Sweet Spots docs.
+│   ├── probability_drift.md          # Probability drift, PSI & Alpha stability docs.
 │   ├── pycaret.md                    # PyCaret AutoML documentation.
 │   ├── regime_scoring.md             # Regime-based feature scoring documentation.
 │   ├── regularized_linear.md         # Regularized linear regression docs.
@@ -85,6 +87,8 @@
 │       ├── permutation_importance_ts.py # Time-series permutation module.
 │       ├── probability.py            # 20-bin Quantile Conditional Probability & WoE/IV module.
 │       ├── probability_2d.py         # 2D Joint Probability Heatmap & Sweet Spots module.
+│       ├── probability_3d.py         # 3D Joint Probability & Hyper Sweet Spots module.
+│       ├── probability_drift.py      # Probability drift, PSI & Alpha stability module.
 │       ├── regime_scoring.py         # Market regime scoring module.
 │       ├── regularized_linear.py     # Lasso/Ridge regularized linear module.
 │       ├── scipy.py                  # SciPy hypothesis testing module.
@@ -116,6 +120,8 @@
     ├── test_kmean.py                 # Tests for KMeans module.
     ├── test_probability.py           # Tests for probability module.
     ├── test_probability_2d.py        # Tests for probability_2d module.
+    ├── test_probability_3d.py        # Tests for probability_3d module.
+    ├── test_probability_drift.py     # Tests for probability_drift module.
     ├── test_signal_analysis.py       # Tests for signal analysis module.
     ├── test_time_series_scoring.py   # Tests for walk-forward scoring.
     ├── test_visual_regions.py        # Tests for visual regions module.
