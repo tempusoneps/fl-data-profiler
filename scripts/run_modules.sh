@@ -42,6 +42,8 @@ FAST_MODULES=(
   "alphalens"
   "probability"
   "probability_2d"
+  "probability_3d"
+  "probability_drift"
   "kmean"
   "visual_regions"
   "sklearn"
@@ -119,12 +121,16 @@ ${C_BOLD}Default Fast Modules (14 - Running by default):${C_RESET}
   6.  signal_analysis          - Trading signal evaluation (AUC, PR-AUC, F1, redundancy) (~6s)
   7.  regime_scoring           - Market regime-segmented feature scoring (~4s)
   8.  alphalens                - Factor tearsheet analysis & forward return quantiles (~5s)
-  9.  kmean                    - 2D KMeans clustering & label separability (~30s)
-  10. visual_regions           - 2D grid decision rule generator (~30s)
-  11. sklearn                  - Scikit-Learn baseline models (SGDClassifier, Ridge) (~5s)
-  12. regularized_linear       - Lasso (L1) and Ridge (L2) regression shrinkage (~8s)
-  13. xgboost                  - XGBoost GBDT importance & confusion matrix (~15s)
-  14. lightgbm                 - LightGBM fast histogram GBDT importance (~10s)
+  9.  probability              - 20-bin Quantile Conditional Probability & WoE/IV (~4s)
+  10. probability_2d           - 2D Joint Probability Heatmap & Sweet Spots (~10s)
+  11. probability_3d           - 3D Joint Probability & Hyper Sweet Spots (~15s)
+  12. probability_drift        - Time-series probability stability & PSI drift (~5s)
+  13. kmean                    - 2D KMeans clustering & label separability (~30s)
+  14. visual_regions           - 2D grid decision rule generator (~30s)
+  15. sklearn                  - Scikit-Learn baseline models (SGDClassifier, Ridge) (~5s)
+  16. regularized_linear       - Lasso (L1) and Ridge (L2) regression shrinkage (~8s)
+  17. xgboost                  - XGBoost GBDT importance & confusion matrix (~15s)
+  18. lightgbm                 - LightGBM fast histogram GBDT importance (~10s)
 
 ${C_BOLD}Slow / Resource-Intensive Modules (11 - Excluded by default, enable via --all):${C_RESET}
   - mutual_information         - KNN mutual info across all continuous features (~90m)

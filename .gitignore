@@ -6,11 +6,12 @@
 *.csv
 *.parquet
 *.log
-reports/*
-__pycache__/
 *.py[cod]
 *$py.class
 *.parquet
 .superpowers
 .pytest_cache
 docs/superpowers
+reports/*
+__pycache__/
+insights/
