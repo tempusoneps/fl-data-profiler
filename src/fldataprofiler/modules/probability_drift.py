@@ -400,7 +400,10 @@ def _plot_probability_drift_charts(
         )
         ax.set_xlabel("Quantile Bin (1 - 20)", fontsize=9.5)
         ax.set_ylabel("P(Class | Bin)", fontsize=9.5)
-        ax.set_ylim(0.0, 1.05)
+        all_probs = subset["conditional_prob"].to_numpy()
+        y_max = float(np.nanmax(all_probs)) if len(all_probs) > 0 else 0.0
+        upper_limit = min(1.05, max(0.01, y_max * 1.25))
+        ax.set_ylim(0.0, upper_limit)
         ax.legend(loc="upper left", fontsize=8, ncol=2)
         ax.grid(True, linestyle=":", alpha=0.6)
 

@@ -229,6 +229,87 @@ class ProbabilityModuleTests(unittest.TestCase):
             self.assertTrue((output_dir / "probability" / "summary.json").exists())
 
 
+    def test_plot_probability_distribution_multi_targets(self) -> None:
+        from fldataprofiler.modules.probability import _plot_probability_distribution
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            scores_df = pd.DataFrame([
+                {
+                    "feature": "feat_a",
+                    "target": "target_1",
+                    "target_class": 1,
+                    "information_value": 0.8,
+                    "prob_spread": 0.6,
+                    "base_rate": 0.5,
+                },
+                {
+                    "feature": "feat_a",
+                    "target": "target_1",
+                    "target_class": 0,
+                    "information_value": 0.8,
+                    "prob_spread": 0.6,
+                    "base_rate": 0.5,
+                },
+                {
+                    "feature": "feat_a",
+                    "target": "target_2",
+                    "target_class": "up",
+                    "information_value": 0.5,
+                    "prob_spread": 0.4,
+                    "base_rate": 0.33,
+                },
+                {
+                    "feature": "feat_a",
+                    "target": "target_2",
+                    "target_class": "down",
+                    "information_value": 0.5,
+                    "prob_spread": 0.4,
+                    "base_rate": 0.33,
+                },
+                {
+                    "feature": "feat_a",
+                    "target": "target_2",
+                    "target_class": "flat",
+                    "information_value": 0.5,
+                    "prob_spread": 0.4,
+                    "base_rate": 0.34,
+                },
+            ])
+
+            q_rows = []
+            for b in range(1, 21):
+                q_rows.append({
+                    "feature": "feat_a",
+                    "target": "target_1",
+                    "target_class": 1,
+                    "bin_index": b,
+                    "conditional_prob": b / 20.0,
+                })
+                q_rows.append({
+                    "feature": "feat_a",
+                    "target": "target_1",
+                    "target_class": 0,
+                    "bin_index": b,
+                    "conditional_prob": 1.0 - b / 20.0,
+                })
+                for c in ["up", "down", "flat"]:
+                    q_rows.append({
+                        "feature": "feat_a",
+                        "target": "target_2",
+                        "target_class": c,
+                        "bin_index": b,
+                        "conditional_prob": 0.33,
+                    })
+            quantiles_df = pd.DataFrame(q_rows)
+
+            plot_path = tmp_path / "prob.png"
+            out = _plot_probability_distribution(scores_df, quantiles_df, plot_path)
+            self.assertTrue(out.exists())
+            self.assertGreater(out.stat().st_size, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

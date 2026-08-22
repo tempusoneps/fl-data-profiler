@@ -289,16 +289,16 @@ def _plot_kelly_distribution(
         plt.close(fig)
         return output_path
 
-    # Identify top unique features by max kelly_rank_score
-    top_features = (
-        scores_df.groupby("feature")["kelly_rank_score"]
-        .max()
-        .sort_values(ascending=False)
+    # Identify top unique feature-target relationships by max kelly_rank_score
+    top_pairs_df = (
+        scores_df.sort_values(
+            ["kelly_rank_score", "max_expected_value"], ascending=[False, False]
+        )
+        .drop_duplicates(subset=["feature", "target"])
         .head(4)
-        .index.tolist()
     )
 
-    n_plots = len(top_features)
+    n_plots = len(top_pairs_df)
     if n_plots == 1:
         nrows, ncols = 1, 1
         figsize = (9, 5)
@@ -312,14 +312,20 @@ def _plot_kelly_distribution(
     fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
     flat_axes = axes.flatten()
 
-    for i, feature in enumerate(top_features):
+    for i, (_, row) in enumerate(top_pairs_df.iterrows()):
         ax = flat_axes[i]
-        feat_scores = scores_df[scores_df["feature"] == feature]
-        feat_quantiles = quantiles_df[quantiles_df["feature"] == feature]
+        feature = str(row["feature"])
+        target_name = str(row["target"])
+
+        feat_scores = scores_df[
+            (scores_df["feature"] == feature) & (scores_df["target"] == target_name)
+        ]
+        feat_quantiles = quantiles_df[
+            (quantiles_df["feature"] == feature) & (quantiles_df["target"] == target_name)
+        ]
 
         best_score_row = feat_scores.sort_values("kelly_rank_score", ascending=False).iloc[0]
         c = best_score_row["target_class"]
-        target_name = str(best_score_row["target"])
         payoff_b = best_score_row["payoff_ratio_b"]
         breakeven_p = best_score_row["breakeven_prob"]
 
@@ -329,7 +335,7 @@ def _plot_kelly_distribution(
         half_kellys = c_quantiles["half_kelly"].to_numpy()
         win_probs = c_quantiles["win_prob"].to_numpy()
 
-        # Bar colors: Green for positive Kelly edge, Red for negative/zero edge
+        # Bar colors: Green for positive Kelly edge, Slate for negative/zero edge
         colors = ["#16a34a" if k > 0 else "#94a3b8" for k in kellys]
 
         # Primary axis: Kelly Bet Size
@@ -354,7 +360,7 @@ def _plot_kelly_distribution(
 
         ax.axhline(0.0, color="#334155", linestyle="-", linewidth=1.0, alpha=0.7)
         ax.set_ylabel("Kelly Fraction (Position Size %)", color="#0f172a", fontsize=10)
-        ax.set_xlabel("Quantile Bin (1 - 20)", fontsize=10)
+        ax.set_xlabel(f"Quantile Bin (1 - {len(bins)})", fontsize=10)
 
         # Secondary axis: Win Probability & Breakeven Line
         ax2 = ax.twinx()
@@ -378,8 +384,8 @@ def _plot_kelly_distribution(
         ax2.set_ylabel("Win Probability", color="#dc2626", fontsize=10)
         ax2.set_ylim(0.0, 1.05)
 
-        max_k = best_score_row["max_kelly_fraction"]
-        max_ev = best_score_row["max_expected_value"]
+        max_k = float(best_score_row["max_kelly_fraction"])
+        max_ev = float(best_score_row["max_expected_value"])
         ax.set_title(
             f"{feature} vs {target_name} ({c}) [R:R = {payoff_b}:1]\nMax Kelly: {max_k*100:.1f}% | Max EV: +{max_ev:.2f}R",
             fontsize=11,
