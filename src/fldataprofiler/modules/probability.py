@@ -231,16 +231,14 @@ def _plot_probability_distribution(
         plt.close(fig)
         return output_path
 
-    # Identify top unique features by max information_value / prob_spread
-    top_features = (
-        scores_df.groupby("feature")["information_value"]
-        .max()
-        .sort_values(ascending=False)
+    # Identify top unique feature-target relationships by information_value / prob_spread
+    top_pairs_df = (
+        scores_df.sort_values(["information_value", "prob_spread"], ascending=[False, False])
+        .drop_duplicates(subset=["feature", "target"])
         .head(4)
-        .index.tolist()
     )
 
-    n_plots = len(top_features)
+    n_plots = len(top_pairs_df)
     if n_plots == 1:
         nrows, ncols = 1, 1
         figsize = (8, 4.5)
@@ -256,33 +254,57 @@ def _plot_probability_distribution(
 
     colors = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c"]
 
-    for i, feature in enumerate(top_features):
+    for i, (_, row) in enumerate(top_pairs_df.iterrows()):
         ax = flat_axes[i]
-        feat_scores = scores_df[scores_df["feature"] == feature]
-        feat_quantiles = quantiles_df[quantiles_df["feature"] == feature]
+        feature = str(row["feature"])
+        target_name = str(row["target"])
 
-        target_classes = feat_quantiles["target_class"].unique()
-        target_name = str(feat_scores.iloc[0]["target"])
+        feat_scores = scores_df[
+            (scores_df["feature"] == feature) & (scores_df["target"] == target_name)
+        ]
+        feat_quantiles = quantiles_df[
+            (quantiles_df["feature"] == feature) & (quantiles_df["target"] == target_name)
+        ]
+
+        target_classes = sorted(feat_quantiles["target_class"].unique(), key=lambda v: str(v))
 
         if len(target_classes) == 2:
             # Binary: plot positive or max-spread class
-            best_class_row = feat_scores.sort_values("prob_spread", ascending=False).iloc[0]
-            c = best_class_row["target_class"]
+            pos_classes = [
+                c
+                for c in target_classes
+                if str(c).lower() in ("1", "1.0", "true", "buy", "up", "pos", "positive")
+            ]
+            if pos_classes:
+                c = pos_classes[0]
+                matching_rows = feat_scores[feat_scores["target_class"] == c]
+                best_class_row = (
+                    matching_rows.iloc[0] if not matching_rows.empty else feat_scores.iloc[0]
+                )
+            else:
+                best_class_row = feat_scores.sort_values("prob_spread", ascending=False).iloc[0]
+                c = best_class_row["target_class"]
+
             c_quantiles = feat_quantiles[feat_quantiles["target_class"] == c].sort_values("bin_index")
 
             bins = c_quantiles["bin_index"].to_numpy()
             probs = c_quantiles["conditional_prob"].to_numpy()
-            base_rate = best_class_row["base_rate"]
-            iv = best_class_row["information_value"]
-            spread = best_class_row["prob_spread"]
+            base_rate = float(best_class_row["base_rate"])
+            iv = float(best_class_row["information_value"])
+            spread = float(best_class_row["prob_spread"])
 
             ax.bar(bins, probs, color="#3b82f6", alpha=0.85, edgecolor="#1d4ed8", width=0.8)
+            base_label = (
+                f"Base Rate ({base_rate:.2%})"
+                if base_rate < 0.05
+                else f"Base Rate ({base_rate:.2f})"
+            )
             ax.axhline(
                 base_rate,
                 color="#ef4444",
                 linestyle="--",
                 linewidth=1.5,
-                label=f"Base Rate ({base_rate:.2f})",
+                label=base_label,
             )
             ax.set_title(
                 f"{feature} vs {target_name} ({c})\nIV: {iv:.3f} | Spread: {spread:.3f}",
@@ -290,6 +312,11 @@ def _plot_probability_distribution(
                 fontweight="bold",
             )
             ax.legend(loc="upper left", fontsize=9)
+            ax.set_ylabel(f"P({c} | Bin)", fontsize=10)
+
+            y_max = max(float(np.max(probs)) if len(probs) > 0 else 0.0, base_rate)
+            upper_limit = min(1.05, max(0.01, y_max * 1.25))
+            ax.set_ylim(0.0, upper_limit)
         else:
             # Multiclass: plot lines for each class
             for idx, c in enumerate(target_classes):
@@ -308,18 +335,23 @@ def _plot_probability_distribution(
                     color=color,
                 )
 
-            max_iv = feat_scores["information_value"].max()
-            max_spread = feat_scores["prob_spread"].max()
+            max_iv = float(feat_scores["information_value"].max())
+            max_spread = float(feat_scores["prob_spread"].max())
             ax.set_title(
                 f"{feature} vs {target_name}\nMax IV: {max_iv:.3f} | Max Spread: {max_spread:.3f}",
                 fontsize=11,
                 fontweight="bold",
             )
             ax.legend(loc="upper left", fontsize=9)
+            ax.set_ylabel("P(Class | Bin)", fontsize=10)
 
-        ax.set_xlabel("Quantile Bin (1 - 20)", fontsize=10)
-        ax.set_ylabel("P(Class | Bin)", fontsize=10)
-        ax.set_ylim(0.0, 1.05)
+            all_probs = feat_quantiles["conditional_prob"].to_numpy()
+            y_max = float(np.nanmax(all_probs)) if len(all_probs) > 0 else 0.0
+            upper_limit = min(1.05, max(0.01, y_max * 1.25))
+            ax.set_ylim(0.0, upper_limit)
+
+        n_bins_plotted = len(bins) if len(target_classes) > 0 else DEFAULT_N_BINS
+        ax.set_xlabel(f"Quantile Bin (1 - {n_bins_plotted})", fontsize=10)
         ax.grid(True, linestyle=":", alpha=0.6)
 
     # Hide unused subplots if any
