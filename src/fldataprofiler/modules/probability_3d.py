@@ -350,10 +350,15 @@ def _compute_triplet_target_probabilities(
 
         if filtered_candidates:
             best_voxel = max(filtered_candidates, key=lambda d: (d["prob"], d["lift"], d["sample_count"]))
+            def _format_clause(feat: str, v_min: float, v_max: float) -> str:
+                if v_min == v_max:
+                    return f"{feat} == {_round(v_min)}"
+                return f"{_round(v_min)} <= {feat} <= {_round(v_max)}"
+
             sweet_spot_rule = (
-                f"{_round(best_voxel['x_min'])} <= {f1_name} <= {_round(best_voxel['x_max'])} AND "
-                f"{_round(best_voxel['y_min'])} <= {f2_name} <= {_round(best_voxel['y_max'])} AND "
-                f"{_round(best_voxel['z_min'])} <= {f3_name} <= {_round(best_voxel['z_max'])}"
+                f"{_format_clause(f1_name, best_voxel['x_min'], best_voxel['x_max'])} AND "
+                f"{_format_clause(f2_name, best_voxel['y_min'], best_voxel['y_max'])} AND "
+                f"{_format_clause(f3_name, best_voxel['z_min'], best_voxel['z_max'])}"
             )
             sweet_spot_prob = best_voxel["prob"]
             sweet_spot_lift = best_voxel["lift"]

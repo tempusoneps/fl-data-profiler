@@ -337,9 +337,14 @@ def _compute_pair_target_probabilities(
         eligible.sort(key=lambda item: (item["prob"], item["sample_count"]), reverse=True)
         best = eligible[0] if eligible else None
 
+        def _format_clause(feat: str, v_min: float, v_max: float) -> str:
+            if v_min == v_max:
+                return f"{feat} == {v_min:.4g}"
+            return f"{v_min:.4g} <= {feat} <= {v_max:.4g}"
+
         rule_str = (
-            f"{best['x_min']:.4g} <= {f1_name} <= {best['x_max']:.4g} AND "
-            f"{best['y_min']:.4g} <= {f2_name} <= {best['y_max']:.4g}"
+            f"{_format_clause(f1_name, best['x_min'], best['x_max'])} AND "
+            f"{_format_clause(f2_name, best['y_min'], best['y_max'])}"
             if best
             else ""
         )
