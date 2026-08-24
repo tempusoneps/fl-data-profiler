@@ -178,6 +178,33 @@ class ProbabilityMarkovModuleTests(unittest.TestCase):
             self.assertEqual(exit_code_alias, 0)
             self.assertTrue((output_dir_alias / "probability_markov" / "report.html").exists())
 
+    def test_probability_markov_config_and_env_overrides(self) -> None:
+        from fldataprofiler.modules.probability_markov import ProbabilityMarkovConfig
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            feature_path, label_path = make_markov_test_datasets(tmp_path, rows=200)
+            output_dir = tmp_path / "reports"
+
+            cfg = ProbabilityMarkovConfig(
+                n_bins=5,
+                min_pattern_samples=15,
+                min_support=0.01,
+                min_excess_probability=0.02,
+                min_lift=1.05,
+                objective="support_weighted",
+            )
+            module = ProbabilityMarkovModule(config=cfg)
+            result = module.run(
+                feature_path,
+                label_path,
+                output_dir,
+                targets=["binary_target"],
+            )
+            summary = json.loads((result.report_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["objective"], "support_weighted")
+            self.assertEqual(summary["min_support"], 0.01)
+
 
 if __name__ == "__main__":
     unittest.main()

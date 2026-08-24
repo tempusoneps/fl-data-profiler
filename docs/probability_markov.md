@@ -35,25 +35,54 @@ The `probability_markov` module analyzes first-order sequential state-transition
 
 ---
 
+## Configuration Options
+
+`probability_markov` supports flexible configuration via `ProbabilityMarkovConfig`, `config.default.json`, or environment variables:
+
+| Parameter | Default | Env Variable | Description |
+| :--- | :--- | :--- | :--- |
+| `n_bins` | `5` | `MARKOV_N_BINS` | Number of quantile states ($Q_1 \dots Q_M$) per feature dimension ($5 \times 5$ matrix). |
+| `min_pattern_samples` | `100` | `MARKOV_MIN_SAMPLES` | Absolute minimum sample occurrences required for a transition ($N \ge 100$). |
+| `min_support` | `0.002` (0.2%) | `MARKOV_MIN_SUPPORT` | Minimum fraction of dataset required ($N \ge \text{min\_support} \times N_{\text{total}}$). |
+| `min_excess_probability` | `0.05` (+5%) | `MARKOV_MIN_EXCESS_PROB` | Minimum incremental alpha over stationary state ($P_{\text{transition}} - P_{\text{static}} \ge 5\%$). |
+| `min_lift` | `1.10` | `MARKOV_MIN_LIFT` | Minimum lift over global base rate. |
+| `objective` | `"support_weighted"` | `MARKOV_OBJECTIVE` | Pattern ranking objective: `"support_weighted"` ($\Delta P \times \sqrt{N}$) vs `"excess_probability"`. |
+
+---
+
 ## Usage Example
 
 ### Command Line Interface (CLI)
 
 ```bash
-uv run fldataprofiler fit datasets/feature.parquet datasets/label.csv --module probability_markov --target label_direction
+# Run with robust default settings (N >= 100 samples)
+uv run fldataprofiler fit datasets/selected_feature.parquet datasets/label.csv --module probability_markov
+
+# Customize minimum sample support via environment variables:
+MARKOV_MIN_SAMPLES=200 MARKOV_MIN_SUPPORT=0.005 uv run fldataprofiler fit datasets/selected_feature.parquet datasets/label.csv --module probability_markov
 ```
 
 ### Python API
 
 ```python
-from fldataprofiler.modules.probability_markov import ProbabilityMarkovModule
+from fldataprofiler.modules.probability_markov import ProbabilityMarkovConfig, ProbabilityMarkovModule
 
-module = ProbabilityMarkovModule(n_bins=5, min_pattern_samples=15)
+# Configure via ProbabilityMarkovConfig
+config = ProbabilityMarkovConfig(
+    n_bins=5,
+    min_pattern_samples=150,       # At least 150 samples per transition
+    min_support=0.003,              # 0.3% of total data
+    min_excess_probability=0.05,    # At least +5% alpha over static
+    objective="support_weighted",
+)
+
+module = ProbabilityMarkovModule(config=config)
 result = module.run(
-    feature_csv="datasets/feature.parquet",
+    feature_csv="datasets/selected_feature.parquet",
     label_csv="datasets/label.csv",
     output_dir="reports",
     join_key="Date",
-    targets=["label_direction"],
+    targets=["direction_filter", "allow_entry"],
 )
 ```
+

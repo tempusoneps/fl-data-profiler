@@ -37,25 +37,55 @@ The `probability_scorecard` module constructs an industry-standard additive scor
 
 ---
 
+## Configuration Options
+
+`probability_scorecard` supports flexible configuration via `ProbabilityScorecardConfig`, `config.default.json`, or environment variables:
+
+| Parameter | Default | Env Variable | Description |
+| :--- | :--- | :--- | :--- |
+| `base_score` | `600` | `SCORECARD_BASE_SCORE` | Target score aligned to baseline odds (e.g. 600 points). |
+| `base_odds` | `1.0` | `SCORECARD_BASE_ODDS` | Baseline odds ($P / (1-P)$) corresponding to base score. |
+| `pdo` | `20.0` | `SCORECARD_PDO` | Points to Double the Odds ($\text{PDO} = 20$ means +20 pts doubles the odds). |
+| `n_bins` | `10` | `SCORECARD_N_BINS` | Number of quantile bins for Weight of Evidence discretization. |
+| `max_features` | `12` | `SCORECARD_MAX_FEATURES` | Maximum number of top IV features included in the scorecard. |
+| `min_iv` | `0.02` | `SCORECARD_MIN_IV` | Minimum Information Value threshold to qualify a feature ($IV \ge 0.02$). |
+
+---
+
 ## Usage Example
 
 ### Command Line Interface (CLI)
 
 ```bash
-uv run fldataprofiler fit datasets/feature.parquet datasets/label.csv --module probability_scorecard --target label_trend
+# Run with default config
+uv run fldataprofiler fit datasets/selected_feature.parquet datasets/label.csv --module probability_scorecard
+
+# Custom configuration via environment variables:
+SCORECARD_BASE_SCORE=650 SCORECARD_PDO=30 SCORECARD_MAX_FEATURES=15 uv run fldataprofiler fit datasets/selected_feature.parquet datasets/label.csv --module probability_scorecard
 ```
 
 ### Python API
 
 ```python
-from fldataprofiler.modules.probability_scorecard import ProbabilityScorecardModule
+from fldataprofiler.modules.probability_scorecard import ProbabilityScorecardConfig, ProbabilityScorecardModule
 
-module = ProbabilityScorecardModule(base_score=600, pdo=20, n_bins=10, max_features=10)
+# Configure via ProbabilityScorecardConfig
+config = ProbabilityScorecardConfig(
+    base_score=600,
+    base_odds=1.0,
+    pdo=20.0,
+    n_bins=10,
+    max_features=12,
+    min_iv=0.02,
+)
+
+module = ProbabilityScorecardModule(config=config)
 result = module.run(
-    feature_csv="datasets/feature.parquet",
+    feature_csv="datasets/selected_feature.parquet",
     label_csv="datasets/label.csv",
     output_dir="reports",
     join_key="Date",
-    targets=["label_trend"],
+    targets=["direction_filter"],
 )
 ```
+

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 
+from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
 from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
@@ -43,7 +45,22 @@ DEFAULT_MAX_FEATURES = 12
 DEFAULT_BASE_SCORE = 600
 DEFAULT_BASE_ODDS = 1.0
 DEFAULT_PDO = 20.0
+DEFAULT_MIN_IV = 0.02
+DEFAULT_SCORE_MIN_BOUND = 300
+DEFAULT_SCORE_MAX_BOUND = 850
 EPSILON = 1e-9
+
+
+@dataclass
+class ProbabilityScorecardConfig:
+    base_score: int = DEFAULT_BASE_SCORE
+    base_odds: float = DEFAULT_BASE_ODDS
+    pdo: float = DEFAULT_PDO
+    n_bins: int = DEFAULT_N_BINS
+    max_features: int = DEFAULT_MAX_FEATURES
+    min_iv: float = DEFAULT_MIN_IV
+    score_min_bound: int = DEFAULT_SCORE_MIN_BOUND
+    score_max_bound: int = DEFAULT_SCORE_MAX_BOUND
 
 
 @dataclass(frozen=True)
@@ -58,7 +75,11 @@ class ProbabilityScorecardRunMetadata:
     label_shape: DatasetShape
     merged_shape: DatasetShape
     base_score: int
+    base_odds: float
     pdo: float
+    n_bins: int
+    max_features: int
+    min_iv: float
     features_selected: list[str]
     targets: list[str]
     model_rows: int
@@ -162,6 +183,7 @@ def _build_scorecard(
     pdo: float = DEFAULT_PDO,
     n_bins: int = DEFAULT_N_BINS,
     max_features: int = DEFAULT_MAX_FEATURES,
+    min_iv: float = DEFAULT_MIN_IV,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any], pd.Series, pd.Series]:
     """Train multivariate WoE Logistic Regression and scale coefficients into additive scorecard points."""
     y_binary = (target_series == target_series.iloc[0]).astype(int)
@@ -186,10 +208,10 @@ def _build_scorecard(
             "woe_series": woe_series,
         }
 
-    # Select top features with positive IV
+    # Select top features with positive IV >= min_iv
     selected_features = [
         f for f, iv in sorted(feature_ivs.items(), key=lambda item: item[1], reverse=True)
-        if iv > 0.01
+        if iv >= min_iv
     ][:max_features]
 
     if not selected_features:
@@ -401,7 +423,11 @@ def _render_markdown(
                 {"Metric": "Label File", "Value": metadata.label_csv},
                 {"Metric": "Join Strategy", "Value": metadata.join_strategy},
                 {"Metric": "Base Score", "Value": metadata.base_score},
+                {"Metric": "Base Odds", "Value": metadata.base_odds},
                 {"Metric": "Points to Double Odds (PDO)", "Value": metadata.pdo},
+                {"Metric": "Bin Quantiles (n_bins)", "Value": metadata.n_bins},
+                {"Metric": "Max Features", "Value": metadata.max_features},
+                {"Metric": "Min Information Value (min_iv)", "Value": metadata.min_iv},
                 {"Metric": "ROC AUC", "Value": f"{metadata.auc:.4f}"},
                 {"Metric": "KS Statistic", "Value": f"{metadata.ks_statistic:.2%}"},
                 {"Metric": "Features in Scorecard", "Value": ", ".join(metadata.features_selected)},
@@ -612,8 +638,20 @@ def _render_html(
                 <div class="meta-val">{metadata.execution_time}</div>
             </div>
             <div class="meta-item">
+                <div class="meta-label">Base Score & Odds</div>
+                <div class="meta-val">{metadata.base_score} pts (Odds: {metadata.base_odds})</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">PDO</div>
+                <div class="meta-val">{metadata.pdo:.0f} pts</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">Bins & Min IV</div>
+                <div class="meta-val">{metadata.n_bins} bins (Min IV: {metadata.min_iv})</div>
+            </div>
+            <div class="meta-item">
                 <div class="meta-label">Features Included</div>
-                <div class="meta-val">{len(metadata.features_selected)} features</div>
+                <div class="meta-val">{len(metadata.features_selected)} features (Max: {metadata.max_features})</div>
             </div>
             <div class="meta-item">
                 <div class="meta-label">Evaluated Rows</div>
@@ -652,19 +690,69 @@ class ProbabilityScorecardModule:
 
     def __init__(
         self,
+        config: ProbabilityScorecardConfig | None = None,
         progress: bool | None = None,
-        base_score: int = DEFAULT_BASE_SCORE,
-        base_odds: float = DEFAULT_BASE_ODDS,
-        pdo: float = DEFAULT_PDO,
-        n_bins: int = DEFAULT_N_BINS,
-        max_features: int = DEFAULT_MAX_FEATURES,
+        base_score: int | None = None,
+        base_odds: float | None = None,
+        pdo: float | None = None,
+        n_bins: int | None = None,
+        max_features: int | None = None,
+        min_iv: float | None = None,
     ) -> None:
         self.progress = progress
-        self.base_score = base_score
-        self.base_odds = base_odds
-        self.pdo = pdo
-        self.n_bins = n_bins
-        self.max_features = max_features
+        if config is not None:
+            base_cfg = config
+        else:
+            mod_cfg = get_module_config("probability_scorecard")
+            base_cfg = ProbabilityScorecardConfig(
+                base_score=int(mod_cfg.get("base_score", DEFAULT_BASE_SCORE)),
+                base_odds=float(mod_cfg.get("base_odds", DEFAULT_BASE_ODDS)),
+                pdo=float(mod_cfg.get("pdo", DEFAULT_PDO)),
+                n_bins=int(mod_cfg.get("n_bins", DEFAULT_N_BINS)),
+                max_features=int(mod_cfg.get("max_features", DEFAULT_MAX_FEATURES)),
+                min_iv=float(mod_cfg.get("min_iv", DEFAULT_MIN_IV)),
+                score_min_bound=int(mod_cfg.get("score_min_bound", DEFAULT_SCORE_MIN_BOUND)),
+                score_max_bound=int(mod_cfg.get("score_max_bound", DEFAULT_SCORE_MAX_BOUND)),
+            )
+
+        # Check environment variable overrides
+        env_base_score = os.environ.get("SCORECARD_BASE_SCORE")
+        env_base_odds = os.environ.get("SCORECARD_BASE_ODDS")
+        env_pdo = os.environ.get("SCORECARD_PDO")
+        env_n_bins = os.environ.get("SCORECARD_N_BINS")
+        env_max_features = os.environ.get("SCORECARD_MAX_FEATURES")
+        env_min_iv = os.environ.get("SCORECARD_MIN_IV")
+
+        self.base_score = (
+            base_score
+            if base_score is not None
+            else (int(env_base_score) if env_base_score else base_cfg.base_score)
+        )
+        self.base_odds = (
+            base_odds
+            if base_odds is not None
+            else (float(env_base_odds) if env_base_odds else base_cfg.base_odds)
+        )
+        self.pdo = (
+            pdo
+            if pdo is not None
+            else (float(env_pdo) if env_pdo else base_cfg.pdo)
+        )
+        self.n_bins = (
+            n_bins
+            if n_bins is not None
+            else (int(env_n_bins) if env_n_bins else base_cfg.n_bins)
+        )
+        self.max_features = (
+            max_features
+            if max_features is not None
+            else (int(env_max_features) if env_max_features else base_cfg.max_features)
+        )
+        self.min_iv = (
+            min_iv
+            if min_iv is not None
+            else (float(env_min_iv) if env_min_iv else base_cfg.min_iv)
+        )
 
     def run(
         self,
@@ -726,6 +814,7 @@ class ProbabilityScorecardModule:
                 pdo=self.pdo,
                 n_bins=self.n_bins,
                 max_features=self.max_features,
+                min_iv=self.min_iv,
             )
             progress_bar.step("scorecard_fit")
 
@@ -755,7 +844,11 @@ class ProbabilityScorecardModule:
                 label_shape=DatasetShape(*labels.shape),
                 merged_shape=DatasetShape(*merged.shape),
                 base_score=self.base_score,
+                base_odds=self.base_odds,
                 pdo=self.pdo,
+                n_bins=self.n_bins,
+                max_features=self.max_features,
+                min_iv=self.min_iv,
                 features_selected=metrics["selected_features"],
                 targets=valid_targets,
                 model_rows=len(model_frame),

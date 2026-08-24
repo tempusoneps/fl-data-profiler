@@ -163,6 +163,37 @@ class ProbabilityScorecardModuleTests(unittest.TestCase):
             self.assertEqual(exit_code_alias, 0)
             self.assertTrue((output_dir_alias / "probability_scorecard" / "report.html").exists())
 
+    def test_probability_scorecard_config_and_env_overrides(self) -> None:
+        from fldataprofiler.modules.probability_scorecard import ProbabilityScorecardConfig
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            feature_path, label_path = make_scorecard_test_datasets(tmp_path, rows=200)
+            output_dir = tmp_path / "reports"
+
+            cfg = ProbabilityScorecardConfig(
+                base_score=650,
+                base_odds=2.0,
+                pdo=25.0,
+                n_bins=5,
+                max_features=6,
+                min_iv=0.01,
+            )
+            module = ProbabilityScorecardModule(config=cfg)
+            result = module.run(
+                feature_path,
+                label_path,
+                output_dir,
+                targets=["binary_target"],
+            )
+            summary = json.loads((result.report_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["base_score"], 650)
+            self.assertEqual(summary["base_odds"], 2.0)
+            self.assertEqual(summary["pdo"], 25.0)
+            self.assertEqual(summary["n_bins"], 5)
+            self.assertEqual(summary["max_features"], 6)
+            self.assertEqual(summary["min_iv"], 0.01)
+
 
 if __name__ == "__main__":
     unittest.main()

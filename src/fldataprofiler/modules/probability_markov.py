@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
 from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
@@ -38,8 +40,22 @@ MAX_LABEL_CLASSES = 50
 MIN_NON_NULL = 10
 RANDOM_STATE = 42
 DEFAULT_N_BINS = 5  # Quintiles by default for clean 5x5 transitions
-MIN_PATTERN_SAMPLES = 15
+DEFAULT_MIN_PATTERN_SAMPLES = 100
+DEFAULT_MIN_SUPPORT = 0.002  # At least 0.2% of dataset (100 samples / 50k rows)
+DEFAULT_MIN_EXCESS_PROB = 0.05  # At least +5% edge over static probability
+DEFAULT_MIN_LIFT = 1.10
+DEFAULT_OBJECTIVE = "support_weighted"
 EPSILON = 1e-9
+
+
+@dataclass
+class ProbabilityMarkovConfig:
+    n_bins: int = DEFAULT_N_BINS
+    min_pattern_samples: int = DEFAULT_MIN_PATTERN_SAMPLES
+    min_support: float = DEFAULT_MIN_SUPPORT
+    min_excess_probability: float = DEFAULT_MIN_EXCESS_PROB
+    min_lift: float = DEFAULT_MIN_LIFT
+    objective: str = DEFAULT_OBJECTIVE
 
 
 @dataclass(frozen=True)
@@ -55,6 +71,8 @@ class ProbabilityMarkovRunMetadata:
     merged_shape: DatasetShape
     n_bins: int
     min_pattern_samples: int
+    min_support: float
+    objective: str
     features_analyzed: list[str]
     targets: list[str]
     model_rows: int
@@ -80,7 +98,7 @@ def _compute_markov_transitions_for_feature(
     feature_name: str,
     target_name: str,
     n_bins: int = DEFAULT_N_BINS,
-    min_samples: int = MIN_PATTERN_SAMPLES,
+    min_samples: int = DEFAULT_MIN_PATTERN_SAMPLES,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Compute 1st-order sequential Markov transition probabilities and conditional label win rates."""
     clean_f = _numeric_series(feature_series)
@@ -304,6 +322,8 @@ def _render_markdown(
                 {"Metric": "Join Strategy", "Value": metadata.join_strategy},
                 {"Metric": "Quantile States (n_bins)", "Value": metadata.n_bins},
                 {"Metric": "Min Pattern Samples", "Value": metadata.min_pattern_samples},
+                {"Metric": "Min Support", "Value": f"{metadata.min_support:.2%}"},
+                {"Metric": "Optimization Objective", "Value": metadata.objective},
                 {"Metric": "Features Analyzed", "Value": len(metadata.features_analyzed)},
                 {"Metric": "Targets Analyzed", "Value": ", ".join(metadata.targets)},
                 {"Metric": "Evaluated Rows", "Value": metadata.model_rows},
@@ -554,7 +574,11 @@ def _render_html(
             </div>
             <div class="meta-item">
                 <div class="meta-label">Min Pattern Samples</div>
-                <div class="meta-val">{metadata.min_pattern_samples} samples</div>
+                <div class="meta-val">{metadata.min_pattern_samples} samples ({metadata.min_support:.1%})</div>
+            </div>
+            <div class="meta-item">
+                <div class="meta-label">Optimization Objective</div>
+                <div class="meta-val">{metadata.objective}</div>
             </div>
             <div class="meta-item">
                 <div class="meta-label">Evaluated Rows</div>
@@ -586,13 +610,74 @@ class ProbabilityMarkovModule:
 
     def __init__(
         self,
+        config: ProbabilityMarkovConfig | None = None,
         progress: bool | None = None,
-        n_bins: int = DEFAULT_N_BINS,
-        min_pattern_samples: int = MIN_PATTERN_SAMPLES,
+        n_bins: int | None = None,
+        min_pattern_samples: int | None = None,
+        min_support: float | None = None,
+        min_excess_probability: float | None = None,
+        min_lift: float | None = None,
+        objective: str | None = None,
     ) -> None:
         self.progress = progress
-        self.n_bins = n_bins
-        self.min_pattern_samples = min_pattern_samples
+        if config is not None:
+            base_cfg = config
+        else:
+            mod_cfg = get_module_config("probability_markov")
+            base_cfg = ProbabilityMarkovConfig(
+                n_bins=int(mod_cfg.get("n_bins", mod_cfg.get("n_quantiles", DEFAULT_N_BINS))),
+                min_pattern_samples=int(
+                    mod_cfg.get(
+                        "min_pattern_samples",
+                        mod_cfg.get("min_transition_samples", DEFAULT_MIN_PATTERN_SAMPLES),
+                    )
+                ),
+                min_support=float(mod_cfg.get("min_support", DEFAULT_MIN_SUPPORT)),
+                min_excess_probability=float(
+                    mod_cfg.get("min_excess_probability", DEFAULT_MIN_EXCESS_PROB)
+                ),
+                min_lift=float(mod_cfg.get("min_lift", DEFAULT_MIN_LIFT)),
+                objective=str(mod_cfg.get("objective", DEFAULT_OBJECTIVE)),
+            )
+
+        # Check environment variable overrides
+        env_min_samples = os.environ.get("MARKOV_MIN_SAMPLES")
+        env_min_support = os.environ.get("MARKOV_MIN_SUPPORT")
+        env_n_bins = os.environ.get("MARKOV_N_BINS")
+        env_excess_prob = os.environ.get("MARKOV_MIN_EXCESS_PROB")
+        env_min_lift = os.environ.get("MARKOV_MIN_LIFT")
+        env_objective = os.environ.get("MARKOV_OBJECTIVE")
+
+        self.n_bins = (
+            n_bins
+            if n_bins is not None
+            else (int(env_n_bins) if env_n_bins else base_cfg.n_bins)
+        )
+        self.min_pattern_samples = (
+            min_pattern_samples
+            if min_pattern_samples is not None
+            else (int(env_min_samples) if env_min_samples else base_cfg.min_pattern_samples)
+        )
+        self.min_support = (
+            min_support
+            if min_support is not None
+            else (float(env_min_support) if env_min_support else base_cfg.min_support)
+        )
+        self.min_excess_probability = (
+            min_excess_probability
+            if min_excess_probability is not None
+            else (float(env_excess_prob) if env_excess_prob else base_cfg.min_excess_probability)
+        )
+        self.min_lift = (
+            min_lift
+            if min_lift is not None
+            else (float(env_min_lift) if env_min_lift else base_cfg.min_lift)
+        )
+        self.objective = (
+            objective
+            if objective is not None
+            else (env_objective if env_objective else base_cfg.objective)
+        )
 
     def run(
         self,
@@ -645,11 +730,12 @@ class ProbabilityMarkovModule:
             all_transitions: list[dict[str, Any]] = []
             all_meta_features: list[dict[str, Any]] = []
 
-            # Adjust min samples adaptively
+            # Adjust min samples adaptively based on min_pattern_samples and min_support
             eff_min_samples = max(
                 10,
-                min(self.min_pattern_samples, max(10, int(len(model_frame) * 0.03))),
+                max(self.min_pattern_samples, int(self.min_support * len(model_frame))),
             )
+            eff_min_samples = min(eff_min_samples, max(10, int(len(model_frame) * 0.15)))
 
             for target_col in valid_targets:
                 for feat in numeric_features:
@@ -670,17 +756,27 @@ class ProbabilityMarkovModule:
 
             # Extract top patterns
             if not transitions_df.empty:
-                # Filter for patterns with positive excess probability and sample count threshold
                 top_patterns = transitions_df[
-                    (transitions_df["excess_probability"] > 0.02)
+                    (transitions_df["excess_probability"] >= self.min_excess_probability)
                     & (transitions_df["sample_count"] >= eff_min_samples)
-                    & (transitions_df["lift"] > 1.05)
+                    & (transitions_df["lift"] >= self.min_lift)
                 ].copy()
-                top_patterns.sort_values(
-                    by=["excess_probability", "lift", "sample_count"],
-                    ascending=[False, False, False],
-                    inplace=True,
-                )
+
+                if self.objective == "support_weighted":
+                    top_patterns["utility_score"] = top_patterns["excess_probability"] * np.sqrt(
+                        top_patterns["sample_count"]
+                    )
+                    top_patterns.sort_values(
+                        by=["utility_score", "excess_probability", "lift", "sample_count"],
+                        ascending=[False, False, False, False],
+                        inplace=True,
+                    )
+                else:
+                    top_patterns.sort_values(
+                        by=["excess_probability", "lift", "sample_count"],
+                        ascending=[False, False, False],
+                        inplace=True,
+                    )
             else:
                 top_patterns = pd.DataFrame()
 
@@ -710,6 +806,8 @@ class ProbabilityMarkovModule:
                 merged_shape=DatasetShape(*merged.shape),
                 n_bins=self.n_bins,
                 min_pattern_samples=eff_min_samples,
+                min_support=self.min_support,
+                objective=self.objective,
                 features_analyzed=numeric_features,
                 targets=valid_targets,
                 model_rows=len(model_frame),
