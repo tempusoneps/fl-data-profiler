@@ -22,6 +22,9 @@ fl-data-profiling
 │   ├── probability_2d           : Ma trận nhiệt xác suất kết hợp 2D (10x10 grid), Synergy Gain & Sweet Spots
 │   ├── probability_3d           : Không gian xác suất kết hợp 3D (5x5x5 voxels), 3-Way Synergy & Hyper Sweet Spots
 │   ├── probability_drift        : Đánh giá độ ổn định xác suất chuỗi thời gian, PSI & Regime Inversions
+│   ├── probability_prim         : Bump Hunting (PRIM) đào sâu hộp xác suất cao đa chiều & sinh code Python
+│   ├── probability_markov       : Ma trận xác suất chuyển dịch trạng thái theo chuỗi thời gian (Q_{t-1} -> Q_t)
+│   ├── probability_scorecard    : Bảng điểm tích lũy Multivariate WoE & Bayesian Log-Odds Scorecard
 │   ├── information_coefficient  : Walk-forward IC (Pearson & Spearman Rank IC) chuỗi thời gian
 │   ├── signal_analysis          : Đánh giá tín hiệu đơn lẻ, ma trận dư thừa & tín hiệu kết hợp
 │   └── regime_scoring           : Đánh giá sức mạnh đặc trưng theo từng chế độ thị trường
@@ -65,6 +68,9 @@ fl-data-profiling
 | `probability_2d` (hoặc `probability2d`) | [`probability_2d.md`](probability_2d.md) | Joint Probability | Ma trận nhiệt xác suất kết hợp 2D (10x10 grid), Synergy Gain & Sweet Spots |
 | `probability_3d` (hoặc `probability3d`) | [`probability_3d.md`](probability_3d.md) | 3D Probability | Không gian xác suất kết hợp 3D (5x5x5 voxels), 3-Way Synergy & Hyper Sweet Spots |
 | `probability_drift` | [`probability_drift.md`](probability_drift.md) | Alpha Stability | Đánh giá độ ổn định xác suất chuỗi thời gian, PSI, IV Decay & Regime Flips |
+| `probability_prim` (hoặc `prim`, `bump_hunting`) | [`probability_prim.md`](probability_prim.md) | Bump Hunting | Patient Rule Induction Method (PRIM) đào sâu hộp xác suất cao đa chiều, sinh code Python |
+| `probability_markov` (hoặc `markov`) | [`probability_markov.md`](probability_markov.md) | State Transitions | Phân tích xác suất chuyển dịch trạng thái theo chuỗi thời gian ($Q_{t-1} \to Q_t$) |
+| `probability_scorecard` (hoặc `scorecard`) | [`probability_scorecard.md`](probability_scorecard.md) | Scorecard Modeling | Xây dựng hệ thống bảng điểm tích lũy Multivariate WoE & Bayesian Log-Odds Scorecard |
 | `eda` | [`eda.md`](eda.md) | Data Profiling | Kiểm tra missingness, phân phối, kiểu dữ liệu, correlation heatmaps |
 | `statistics` | [`statistics.md`](statistics.md) | Descriptive Stats | Tương quan tuyến tính Pearson, thống kê mô tả, quantile profile |
 | `scipy` | [`scipy.md`](scipy.md) | Hypothesis Testing | Kiểm định p-value nghiêm ngặt (t-test, ANOVA, Kruskal, Chi-square, effect size) |

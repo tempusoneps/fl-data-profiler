@@ -10,6 +10,9 @@
 - **`probability_2d`** (hoặc `probability2d`): 2D Joint Probability Heatmaps on $10 \times 10$ quantile grids, 2D Information Value ($IV_{2D}$), Synergy Gain, and Sweet Spot Rule extraction.
 - **`probability_3d`** (hoặc `probability3d`): 3D Joint Probability Hyper-Voxels on $5 \times 5 \times 5$ quantile grids, 3-Way Synergy Gain, and 3D Hyper-Voxel Sweet Spot Rule extraction.
 - **`probability_drift`**: Time-series probability stability, Population Stability Index (PSI), IV alpha decay, and regime / monotonicity inversion checks across chronological time folds.
+- **`probability_prim`** (hoặc `prim`, `bump_hunting`, `prob_prim`): Patient Rule Induction Method (PRIM) bump hunting, multi-dimensional boundary peeling ($\alpha = 0.05$), box expansion, Bayesian 95% Credible Intervals, Fisher exact test $p$-values, 2D sweet spot visualization, and executable Python rule generator (`rule_code_python.py`).
+- **`probability_markov`** (hoặc `markov`, `sequential_probability`, `transition_probability`): Sequential state-transition conditional probability ($P(Y_{t+1} \mid S_t \cap S_{t-1})$), Markov transition entropy, excess alpha momentum triggers ($\Delta P$), and 2D state transition heatmaps.
+- **`probability_scorecard`** (hoặc `scorecard`, `woe_scorecard`, `logodds`): Multivariate WoE additive scorecard model, log-odds point scaling (Base Score 600, PDO 20), Kolmogorov-Smirnov (KS) statistic separation, and decile probability calibration curves.
 - **`information_coefficient`**: Walk-forward time-series Pearson IC and Spearman Rank IC across rolling time folds.
 - **`signal_analysis`**: Single trading signal scoring (ROC-AUC, PR-AUC, F1), signal redundancy matrix, and combined XGBoost multi-signal model.
 - **`regime_scoring`**: Market regime-aware feature scoring across volatility/trend segments.

@@ -6,6 +6,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from fldataprofiler.config import (
+    get_global_config,
+    get_prune_config,
+    load_config,
+)
 from fldataprofiler.feature_pruner import PruneConfig, load_scores, prune_features
 from fldataprofiler.registry import get_module, list_modules
 from fldataprofiler.utils import (
@@ -20,6 +25,8 @@ from fldataprofiler.utils import (
 def _register_prune_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
+    prune_defaults = get_prune_config()
+
     parser = subparsers.add_parser(
         "prune",
         help="Filter and export a clean feature dataset (drops collinear, null, and low-variance features)",
@@ -33,30 +40,35 @@ def _register_prune_parser(
         "-o",
         "--output",
         type=Path,
-        help="Path for pruned output file (default: datasets/selected_feature.<ext>)",
+        help=f"Path for pruned output file (default: {prune_defaults.get('output_path', 'datasets/selected_feature.parquet')})",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Optional path to custom config.json (overrides config.default.json)",
     )
     parser.add_argument(
         "--max-corr",
         type=float,
-        default=0.85,
+        default=float(prune_defaults.get("max_corr", 0.85)),
         help="Maximum allowable pairwise correlation between features (default: 0.85)",
     )
     parser.add_argument(
         "--corr-method",
         choices=["pearson", "spearman"],
-        default="pearson",
+        default=str(prune_defaults.get("corr_method", "pearson")),
         help="Correlation method (default: pearson)",
     )
     parser.add_argument(
         "--max-null",
         type=float,
-        default=0.20,
+        default=float(prune_defaults.get("max_null", 0.20)),
         help="Maximum fraction of null/NaN values allowed for a feature (default: 0.20)",
     )
     parser.add_argument(
         "--min-variance",
         type=float,
-        default=0.0,
+        default=float(prune_defaults.get("min_variance", 0.0)),
         help="Minimum variance threshold to drop constant features (default: 0.0)",
     )
     parser.add_argument(
@@ -91,15 +103,24 @@ def _register_prune_parser(
 def _run_prune_command(args: argparse.Namespace) -> int:
     df_raw = load_dataframe(args.feature_path)
 
+    # Load configuration if provided
+    config_dict = load_config(args.config) if getattr(args, "config", None) else load_config()
+    prune_cfg = get_prune_config(config_dict)
+
     scores = None
     if args.scores_file:
         scores = load_scores(args.scores_file, score_col=args.score_col)
 
+    max_corr = args.max_corr if args.max_corr != 0.85 else float(prune_cfg.get("max_corr", 0.85))
+    corr_method = args.corr_method if args.corr_method != "pearson" else str(prune_cfg.get("corr_method", "pearson"))
+    max_null = args.max_null if args.max_null != 0.20 else float(prune_cfg.get("max_null", 0.20))
+    min_variance = args.min_variance if args.min_variance != 0.0 else float(prune_cfg.get("min_variance", 0.0))
+
     config = PruneConfig(
-        max_corr=args.max_corr,
-        corr_method=args.corr_method,
-        max_null=args.max_null,
-        min_variance=args.min_variance,
+        max_corr=max_corr,
+        corr_method=corr_method,
+        max_null=max_null,
+        min_variance=min_variance,
         top_k=args.top_k,
         keep_cols=args.keep_cols,
     )
@@ -113,6 +134,12 @@ def _run_prune_command(args: argparse.Namespace) -> int:
     )
     if args.output:
         output_path = args.output
+    elif "output_path" in prune_cfg and prune_cfg["output_path"]:
+        cfg_out = Path(prune_cfg["output_path"])
+        if cfg_out.stem == "selected_feature":
+            output_path = cfg_out.parent / f"selected_feature{ext}"
+        else:
+            output_path = cfg_out
     else:
         output_path = Path("datasets") / f"selected_feature{ext}"
 
@@ -128,7 +155,10 @@ def _run_prune_command(args: argparse.Namespace) -> int:
     else:
         result.df_selected.to_csv(output_path, index=save_index)
 
-    summary_path = args.summary_json or (Path("reports") / "prune_summary.json")
+    summary_path = (
+        args.summary_json
+        or (Path(prune_cfg.get("summary_json", "reports/prune_summary.json")))
+    )
     if summary_path.parent != Path(""):
         summary_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -150,9 +180,16 @@ def _run_prune_command(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    global_defaults = get_global_config()
+
     parser = argparse.ArgumentParser(
         prog="fldataprofiler",
         description="Create reports that profile relationships between feature.csv and label.csv.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Optional path to custom config.json (overrides config.default.json)",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     _register_prune_parser(subparsers)
@@ -160,6 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
     fit = subparsers.add_parser("fit", help="Generate a profiling report")
     fit.add_argument("feature_csv", type=Path, help="Path to feature.csv")
     fit.add_argument("label_csv", type=Path, help="Path to label.csv")
+    fit.add_argument(
+        "--config",
+        type=Path,
+        help="Optional path to custom config.json (overrides config.default.json)",
+    )
     fit.add_argument(
         "--module",
         default="statistics",
@@ -169,7 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     fit.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("reports"),
+        default=Path(global_defaults.get("output_dir", "reports")),
         help="Directory for generated report artifacts",
     )
     fit.add_argument(

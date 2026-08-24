@@ -125,6 +125,120 @@ def load_scores(scores_path: Path | str, score_col: str | None = None) -> dict[s
     return scores
 
 
+def _is_raw_level_feature(col: str, series: pd.Series) -> bool:
+    """Detect non-stationary raw price levels, raw unnormalized volumes, and raw calendar indices."""
+    name = col.lower().strip()
+
+    if not np.issubdtype(series.dtype, np.number) or pd.api.types.is_bool_dtype(series):
+        return False
+
+    # Safe relative / normalized / stationary keywords and suffixes
+    safe_keywords = (
+        "_pct",
+        "_percent",
+        "_ratio",
+        "_return",
+        "_ret",
+        "_norm",
+        "_normalized",
+        "_zscore",
+        "_score",
+        "_signal",
+        "_diff_pct",
+        "_change_pct",
+        "_rel",
+        "_spread_pct",
+        "_dist_pct",
+        "_percentile",
+        "_rank",
+        "_prop",
+        "_std",
+        "_rsi",
+        "_mfi",
+        "_slope",
+        "_roc",
+        "_bb_b",
+        "_keltner",
+        "_cross",
+        "_diff_ratio",
+    )
+    if any(k in name for k in safe_keywords):
+        return False
+
+    # Exact raw price/volume names (retaining cyclical calendar features like month, day_of_month, day_of_week)
+    exact_raw = {"open", "high", "low", "close", "volume", "year"}
+    if name in exact_raw:
+        return True
+
+    # Raw multi-timeframe level prefixes
+    raw_patterns = (
+        "prev_day_open",
+        "prev_day_high",
+        "prev_day_low",
+        "prev_day_close",
+        "prev_day_volume",
+        "prev_day_pivot",
+        "prev_day_r1",
+        "prev_day_r2",
+        "prev_day_s1",
+        "prev_day_s2",
+        "prev_15m_open",
+        "prev_15m_high",
+        "prev_15m_low",
+        "prev_15m_close",
+        "prev_15m_volume",
+        "prev_15m_pivot",
+        "prev_15m_r1",
+        "prev_15m_s1",
+        "prev_30m_open",
+        "prev_30m_high",
+        "prev_30m_low",
+        "prev_30m_close",
+        "prev_30m_volume",
+        "prev_1h_open",
+        "prev_1h_high",
+        "prev_1h_low",
+        "prev_1h_close",
+        "prev_1h_volume",
+        "high_macro",
+        "low_macro",
+        "open_macro",
+        "close_macro",
+        "high_micro",
+        "low_micro",
+        "open_micro",
+        "close_micro",
+        "high_short",
+        "low_short",
+        "open_short",
+        "close_short",
+        "high_medium",
+        "low_medium",
+        "open_medium",
+        "close_medium",
+        "close_min_micro",
+        "close_min_short",
+        "close_max_micro",
+        "close_max_short",
+        "open_min_micro",
+        "open_max_micro",
+    )
+    if any(name == p or name.startswith(p) for p in raw_patterns):
+        return True
+
+    clean = series.dropna()
+    if len(clean) > 0:
+        # Large raw integer volume check
+        if "volume" in name and clean.median() > 1000:
+            return True
+        # Unscaled absolute price coordinate check (>200 level without safe keyword)
+        if any(k in name for k in ("high", "low", "close", "open", "pivot", "vwap", "sma", "ema", "wma")):
+            if float(clean.median()) > 200:
+                return True
+
+    return False
+
+
 def prune_features(
     df: pd.DataFrame,
     config: PruneConfig | None = None,
@@ -134,6 +248,7 @@ def prune_features(
         config = PruneConfig()
 
     dropped_by_reason: dict[str, Any] = {
+        "non_stationary_levels": [],
         "high_null": [],
         "low_variance": [],
         "collinear": {},
@@ -163,16 +278,24 @@ def prune_features(
     ]
     total_candidates = len(candidate_cols)
 
-    # 1. Null filter (treating inf and -inf as invalid/null)
-    survived_null: list[str] = []
+    # 1. Automatic Non-Stationary / Raw Level Filter (drops absolute price levels & unnormalized volumes)
+    survived_stationary: list[str] = []
     for col in candidate_cols:
+        if col not in keep_cols and _is_raw_level_feature(col, df[col]):
+            dropped_by_reason["non_stationary_levels"].append(col)
+        else:
+            survived_stationary.append(col)
+
+    # 2. Null filter (treating inf and -inf as invalid/null)
+    survived_null: list[str] = []
+    for col in survived_stationary:
         null_ratio = float((df[col].isna() | np.isinf(df[col])).mean())
         if null_ratio > config.max_null:
             dropped_by_reason["high_null"].append(col)
         else:
             survived_null.append(col)
 
-    # 2. Variance filter
+    # 3. Variance filter
     survived_var: list[str] = []
     col_variances: dict[str, float] = {}
     for col in survived_null:
@@ -245,6 +368,7 @@ def prune_features(
         "retained_features_count": len(retained),
         "dropped_features_count": total_dropped,
         "dropped_breakdown": {
+            "non_stationary_levels_count": len(dropped_by_reason["non_stationary_levels"]),
             "high_null_count": len(dropped_by_reason["high_null"]),
             "low_variance_count": len(dropped_by_reason["low_variance"]),
             "collinear_count": len(dropped_by_reason["collinear"]),

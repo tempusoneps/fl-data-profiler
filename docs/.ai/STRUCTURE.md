@@ -42,6 +42,9 @@
 │   ├── probability_bayes.md          # Bayesian Probability & Credible Intervals docs.
 │   ├── probability_drift.md          # Probability drift, PSI & Alpha stability docs.
 │   ├── probability_kellycriterion.md # Kelly Criterion & Position Sizing docs.
+│   ├── probability_markov.md         # Sequential State-Transition & Markov Probability docs.
+│   ├── probability_prim.md           # PRIM Bump Hunting & High-Probability Rule extraction docs.
+│   ├── probability_scorecard.md      # Multivariate WoE & Bayesian Log-Odds Scorecard docs.
 │   ├── pycaret.md                    # PyCaret AutoML documentation.
 │   ├── regime_scoring.md             # Regime-based feature scoring documentation.
 │   ├── regularized_linear.md         # Regularized linear regression docs.
@@ -93,6 +96,9 @@
 │       ├── probability_bayes.py      # Bayesian Probability & Credible Intervals module.
 │       ├── probability_drift.py      # Probability drift, PSI & Alpha stability module.
 │       ├── probability_kellycriterion.py # Kelly Criterion & Position Sizing module.
+│       ├── probability_markov.py     # Sequential State-Transition & Markov Probability module.
+│       ├── probability_prim.py       # PRIM Bump Hunting & High-Probability Rule extraction module.
+│       ├── probability_scorecard.py  # Multivariate WoE & Bayesian Log-Odds Scorecard module.
 │       ├── regime_scoring.py         # Market regime scoring module.
 │       ├── regularized_linear.py     # Lasso/Ridge regularized linear module.
 │       ├── scipy.py                  # SciPy hypothesis testing module.
@@ -128,6 +134,9 @@
     ├── test_probability_bayes.py     # Tests for probability_bayes module.
     ├── test_probability_drift.py     # Tests for probability_drift module.
     ├── test_probability_kellycriterion.py # Tests for probability_kellycriterion module.
+    ├── test_probability_markov.py    # Tests for probability_markov module.
+    ├── test_probability_prim.py      # Tests for probability_prim module.
+    ├── test_probability_scorecard.py # Tests for probability_scorecard module.
     ├── test_signal_analysis.py       # Tests for signal analysis module.
     ├── test_time_series_scoring.py   # Tests for walk-forward scoring.
     ├── test_visual_regions.py        # Tests for visual regions module.
