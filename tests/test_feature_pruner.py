@@ -156,3 +156,44 @@ def test_load_scores_from_csv(tmp_path: Path) -> None:
     p4.write_text("feature,comment\nf_one,bad\nf_two,worse\n")
     with pytest.raises(ValueError, match="No valid score column found"):
         load_scores(p4)
+
+
+def test_auto_drop_raw_non_stationary_levels() -> None:
+    df = pd.DataFrame(
+        {
+            "Date": pd.date_range("2024-01-01", periods=10),
+            "Open": np.linspace(1200, 1300, 10),
+            "High": np.linspace(1210, 1310, 10),
+            "Close": np.linspace(1205, 1305, 10),
+            "Volume": np.linspace(50000, 90000, 10),
+            "high_macro": np.linspace(1300, 1400, 10),
+            "prev_day_volume": np.linspace(80000, 120000, 10),
+            "year": [2024] * 10,
+            "month": [1, 5, 2, 8, 3, 11, 4, 7, 9, 12],
+            "day_of_month": [5, 12, 1, 28, 14, 9, 22, 18, 3, 15],
+            "return_15m_pct": np.random.randn(10) * 0.01,
+            "rsi_14": np.linspace(30, 70, 10),
+            "volume_ratio_20d": [1.2, 0.8, 1.5, 0.9, 1.1, 0.7, 1.3, 1.0, 0.95, 1.05],
+        }
+    )
+    result = prune_features(df)
+
+    # Should retain normalized/stationary features and cyclical calendar features (month, day_of_month)
+    assert "return_15m_pct" in result.retained_features
+    assert "rsi_14" in result.retained_features
+    assert "volume_ratio_20d" in result.retained_features
+    assert "month" in result.retained_features
+    assert "day_of_month" in result.retained_features
+
+    # Should drop raw price levels, raw unscaled volume, and non-cyclical year
+    dropped = result.dropped_by_reason["non_stationary_levels"]
+    assert "Open" in dropped
+    assert "High" in dropped
+    assert "Close" in dropped
+    assert "Volume" in dropped
+    assert "high_macro" in dropped
+    assert "prev_day_volume" in dropped
+    assert "year" in dropped
+    assert "month" not in dropped
+    assert "day_of_month" not in dropped
+
