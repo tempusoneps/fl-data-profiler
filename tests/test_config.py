@@ -42,6 +42,18 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(prim_cfg["min_box_samples"], 250)
         self.assertEqual(prim_cfg["objective"], "support_weighted")
 
+        prob_cfg = get_module_config("probability", cfg)
+        self.assertEqual(prob_cfg["n_quantiles"], 20)
+        self.assertEqual(prob_cfg["min_samples"], 10)
+
+        prob2d_cfg = get_module_config("probability_2d", cfg)
+        self.assertEqual(prob2d_cfg["n_bins"], 10)
+        self.assertEqual(prob2d_cfg["min_support"], 20)
+
+        prob3d_cfg = get_module_config("probability_3d", cfg)
+        self.assertEqual(prob3d_cfg["n_bins"], 5)
+        self.assertEqual(prob3d_cfg["min_support"], 20)
+
     def test_custom_config_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

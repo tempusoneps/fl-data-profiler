@@ -349,6 +349,22 @@ class Probability2DModuleTests(unittest.TestCase):
             self.assertEqual(exit_code_alias, 0)
             self.assertTrue((output_dir_alias / "probability_2d" / "report.md").exists())
 
+    def test_probability_2d_module_loads_config(self) -> None:
+        from fldataprofiler.modules.probability_2d import Probability2DConfig
+
+        mod = Probability2DModule()
+        self.assertIsInstance(mod.config, Probability2DConfig)
+        self.assertEqual(mod.n_bins, 10)
+        self.assertEqual(mod.max_candidates, 16)
+        self.assertEqual(mod.min_support, 20)
+
+        custom_cfg = Probability2DConfig(n_bins=8, max_candidates=12, min_support=35)
+        mod_custom = Probability2DModule(config=custom_cfg)
+        self.assertEqual(mod_custom.n_bins, 8)
+        self.assertEqual(mod_custom.max_candidates, 12)
+        self.assertEqual(mod_custom.min_support, 35)
+
 
 if __name__ == "__main__":
     unittest.main()
+
