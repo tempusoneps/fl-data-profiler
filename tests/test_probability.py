@@ -308,8 +308,24 @@ class ProbabilityModuleTests(unittest.TestCase):
             self.assertTrue(out.exists())
             self.assertGreater(out.stat().st_size, 0)
 
+    def test_probability_module_loads_config_and_min_samples(self) -> None:
+        from fldataprofiler.modules.probability import ProbabilityConfig
+
+        # Default initialization should load config
+        mod = ProbabilityModule()
+        self.assertIsInstance(mod.config, ProbabilityConfig)
+        self.assertEqual(mod.n_bins, 20)
+        self.assertEqual(mod.min_samples, 10)
+
+        # Custom config override
+        custom_cfg = ProbabilityConfig(n_bins=10, min_samples=25)
+        mod_custom = ProbabilityModule(config=custom_cfg)
+        self.assertEqual(mod_custom.n_bins, 10)
+        self.assertEqual(mod_custom.min_samples, 25)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

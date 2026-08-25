@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
 from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
@@ -43,6 +44,13 @@ DEFAULT_MIN_SUPPORT = 20
 EPSILON = 1e-7
 
 
+@dataclass
+class Probability2DConfig:
+    n_bins: int = DEFAULT_N_BINS
+    max_candidates: int = DEFAULT_MAX_CANDIDATES
+    min_support: int = DEFAULT_MIN_SUPPORT
+
+
 @dataclass(frozen=True)
 class Probability2DRunMetadata:
     module: str
@@ -56,11 +64,13 @@ class Probability2DRunMetadata:
     merged_shape: DatasetShape
     n_bins: int
     max_candidates: int
+    min_support: int
     features_count: int
     candidate_features: list[str]
     pairs_evaluated: int
     targets: list[str]
     model_rows: int
+
 
 
 def _compute_quantile_bins(series: pd.Series, n_bins: int = DEFAULT_N_BINS) -> pd.Series:
@@ -525,6 +535,7 @@ def _render_markdown(
                 {"Metric": "Join Strategy", "Value": metadata.join_strategy},
                 {"Metric": "Quantile Bins per Axis", "Value": f"{metadata.n_bins}x{metadata.n_bins} (100 cells)"},
                 {"Metric": "Candidate Features Screened", "Value": len(metadata.candidate_features)},
+                {"Metric": "Minimum Cell Support", "Value": metadata.min_support},
                 {"Metric": "Feature Pairs Evaluated", "Value": metadata.pairs_evaluated},
                 {"Metric": "Targets Analyzed", "Value": ", ".join(metadata.targets)},
                 {"Metric": "Rows Evaluated", "Value": metadata.model_rows},
@@ -871,13 +882,32 @@ class Probability2DModule:
 
     def __init__(
         self,
+        config: Probability2DConfig | None = None,
         progress: bool | None = None,
-        n_bins: int = DEFAULT_N_BINS,
-        max_candidates: int = DEFAULT_MAX_CANDIDATES,
+        n_bins: int | None = None,
+        max_candidates: int | None = None,
+        min_support: int | None = None,
     ) -> None:
         self.progress = progress
-        self.n_bins = n_bins
-        self.max_candidates = max_candidates
+        if config is not None:
+            base_cfg = config
+        else:
+            mod_cfg = get_module_config("probability_2d")
+            base_cfg = Probability2DConfig(
+                n_bins=int(mod_cfg.get("n_bins", DEFAULT_N_BINS)),
+                max_candidates=int(mod_cfg.get("max_candidates", DEFAULT_MAX_CANDIDATES)),
+                min_support=int(
+                    mod_cfg.get("min_support", mod_cfg.get("min_samples", DEFAULT_MIN_SUPPORT))
+                ),
+            )
+        self.config = Probability2DConfig(
+            n_bins=n_bins if n_bins is not None else base_cfg.n_bins,
+            max_candidates=max_candidates if max_candidates is not None else base_cfg.max_candidates,
+            min_support=min_support if min_support is not None else base_cfg.min_support,
+        )
+        self.n_bins = self.config.n_bins
+        self.max_candidates = self.config.max_candidates
+        self.min_support = self.config.min_support
 
     def run(
         self,
@@ -950,6 +980,7 @@ class Probability2DModule:
                         n_bins=self.n_bins,
                         f1_1d_stats=f1_stats,
                         f2_1d_stats=f2_stats,
+                        min_support=self.min_support,
                     )
                     all_pair_scores.extend(pair_scores)
                     all_cell_rows.extend(cell_rows)
@@ -987,6 +1018,7 @@ class Probability2DModule:
                 merged_shape=DatasetShape(*merged.shape),
                 n_bins=self.n_bins,
                 max_candidates=self.max_candidates,
+                min_support=self.min_support,
                 features_count=len(numeric_features),
                 candidate_features=candidate_features,
                 pairs_evaluated=len(feature_pairs),

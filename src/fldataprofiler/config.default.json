@@ -42,15 +42,18 @@
       "score_max_bound": 850
     },
     "probability": {
-      "n_quantiles": 20
+      "n_quantiles": 20,
+      "min_samples": 10
     },
     "probability_2d": {
       "n_bins": 10,
-      "max_candidates": 16
+      "max_candidates": 16,
+      "min_support": 20
     },
     "probability_3d": {
       "n_bins": 5,
-      "max_candidates": 10
+      "max_candidates": 10,
+      "min_support": 20
     },
     "probability_drift": {
       "n_folds": 5,

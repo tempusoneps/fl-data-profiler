@@ -137,6 +137,22 @@ class Probability3DModuleTests(unittest.TestCase):
             self.assertIn("summary_metrics", summary)
             self.assertIn("top_triplets", summary)
 
+    def test_probability_3d_module_loads_config(self) -> None:
+        from fldataprofiler.modules.probability_3d import Probability3DConfig
+
+        mod = Probability3DModule()
+        self.assertIsInstance(mod.config, Probability3DConfig)
+        self.assertEqual(mod.n_bins, 5)
+        self.assertEqual(mod.max_candidates, 10)
+        self.assertEqual(mod.min_support, 20)
+
+        custom_cfg = Probability3DConfig(n_bins=4, max_candidates=8, min_support=30)
+        mod_custom = Probability3DModule(config=custom_cfg)
+        self.assertEqual(mod_custom.n_bins, 4)
+        self.assertEqual(mod_custom.max_candidates, 8)
+        self.assertEqual(mod_custom.min_support, 30)
+
 
 if __name__ == "__main__":
     unittest.main()
+

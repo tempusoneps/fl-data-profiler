@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
 from fldataprofiler.modules.progress import ModuleProgress
 from fldataprofiler.modules.statistics import DatasetShape
@@ -37,7 +38,14 @@ MAX_LABEL_CLASSES = 50
 MIN_NON_NULL = 10
 RANDOM_STATE = 42
 DEFAULT_N_BINS = 20
+DEFAULT_MIN_SAMPLES = 10
 EPSILON = 1e-7
+
+
+@dataclass
+class ProbabilityConfig:
+    n_bins: int = DEFAULT_N_BINS
+    min_samples: int = DEFAULT_MIN_SAMPLES
 
 
 @dataclass(frozen=True)
@@ -52,9 +60,11 @@ class ProbabilityRunMetadata:
     label_shape: DatasetShape
     merged_shape: DatasetShape
     n_bins: int
+    min_samples: int
     features: list[str]
     targets: list[str]
     model_rows: int
+
 
 
 def _compute_quantile_bins(series: pd.Series, n_bins: int = DEFAULT_N_BINS) -> pd.Series:
@@ -75,6 +85,7 @@ def _compute_feature_target_probabilities(
     feature_name: str,
     target_name: str,
     n_bins: int = DEFAULT_N_BINS,
+    min_samples: int = 2,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Calculate quantile conditional probabilities, WoE, IV, Spread, Monotonicity, and Entropy."""
     clean_feature = _numeric_series(feature_series)
@@ -83,7 +94,7 @@ def _compute_feature_target_probabilities(
     x = clean_feature[valid_mask]
     y = target_series[valid_mask]
 
-    if len(x) < 2 or y.nunique(dropna=True) < 2 or x.nunique(dropna=True) < 2:
+    if len(x) < max(2, min_samples) or y.nunique(dropna=True) < 2 or x.nunique(dropna=True) < 2:
         return [], []
 
     bins = _compute_quantile_bins(x, n_bins=n_bins)
@@ -379,6 +390,7 @@ def _render_markdown(
                 {"Metric": "Label File", "Value": metadata.label_csv},
                 {"Metric": "Join Strategy", "Value": metadata.join_strategy},
                 {"Metric": "Quantile Bins", "Value": metadata.n_bins},
+                {"Metric": "Minimum Samples", "Value": metadata.min_samples},
                 {"Metric": "Features Analyzed", "Value": len(metadata.features)},
                 {"Metric": "Targets Analyzed", "Value": ", ".join(metadata.targets)},
                 {"Metric": "Rows Evaluated", "Value": metadata.model_rows},
@@ -570,9 +582,30 @@ def _render_html(
 class ProbabilityModule:
     name = "probability"
 
-    def __init__(self, progress: bool | None = None, n_bins: int = DEFAULT_N_BINS) -> None:
+    def __init__(
+        self,
+        config: ProbabilityConfig | None = None,
+        progress: bool | None = None,
+        n_bins: int | None = None,
+        min_samples: int | None = None,
+    ) -> None:
         self.progress = progress
-        self.n_bins = n_bins
+        if config is not None:
+            base_cfg = config
+        else:
+            mod_cfg = get_module_config("probability")
+            base_cfg = ProbabilityConfig(
+                n_bins=int(mod_cfg.get("n_bins", mod_cfg.get("n_quantiles", DEFAULT_N_BINS))),
+                min_samples=int(
+                    mod_cfg.get("min_samples", mod_cfg.get("min_bin_samples", DEFAULT_MIN_SAMPLES))
+                ),
+            )
+        self.config = ProbabilityConfig(
+            n_bins=n_bins if n_bins is not None else base_cfg.n_bins,
+            min_samples=min_samples if min_samples is not None else base_cfg.min_samples,
+        )
+        self.n_bins = self.config.n_bins
+        self.min_samples = self.config.min_samples
 
     def run(
         self,
@@ -618,6 +651,7 @@ class ProbabilityModule:
 
             all_score_rows: list[dict[str, object]] = []
             all_quantile_rows: list[dict[str, object]] = []
+            effective_min_samples = min(self.min_samples, len(model_frame)) if len(model_frame) > 0 else self.min_samples
 
             for feature_col in numeric_features:
                 for target_col in valid_targets:
@@ -627,6 +661,7 @@ class ProbabilityModule:
                         feature_col,
                         target_col,
                         n_bins=self.n_bins,
+                        min_samples=effective_min_samples,
                     )
                     all_score_rows.extend(scores)
                     all_quantile_rows.extend(quantiles)
@@ -657,6 +692,7 @@ class ProbabilityModule:
                 label_shape=DatasetShape(*labels.shape),
                 merged_shape=DatasetShape(*merged.shape),
                 n_bins=self.n_bins,
+                min_samples=self.min_samples,
                 features=numeric_features,
                 targets=valid_targets,
                 model_rows=len(model_frame),
