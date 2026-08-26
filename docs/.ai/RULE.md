@@ -35,4 +35,7 @@ Modules that utilize internal row limits (`MAX_ROWS`) must check `_FULL_ROW_MODE
 When developing or debugging, run targeted tests (e.g. `uv run pytest tests/test_input_formats.py -q`). Do not run heavy end-to-end extraction tests repeatedly unless verifying full release readiness.
 
 ## 6. Do Not Commit Automatically
-AI agents must **NOT** execute `git commit` commands automatically without explicit confirmation and approval from the user.\n
+AI agents must **NOT** execute `git commit` commands automatically without explicit confirmation and approval from the user.
+
+## 7. Do Not Run `fldataprofiler fit`
+AI agents must **NEVER** execute `fldataprofiler fit` (or `uv run fldataprofiler fit ...`) commands, as running profiling on full datasets can consume excessive RAM (gigabytes) and long computation time. Use fast, targeted unit tests in `tests/` with small synthetic test fixtures instead.\n
