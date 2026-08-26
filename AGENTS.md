@@ -96,7 +96,10 @@ Modules that utilize internal row limits (`MAX_ROWS`) must check `_FULL_ROW_MODE
 When developing or debugging, run targeted tests (e.g. `uv run pytest tests/test_input_formats.py -q`). Do not run heavy end-to-end extraction tests repeatedly unless verifying full release readiness.
 
 ## 6. Do Not Commit Automatically
-AI agents must **NOT** execute `git commit` commands automatically without explicit confirmation and approval from the user.\n
+AI agents must **NOT** execute `git commit` commands automatically without explicit confirmation and approval from the user.
+
+## 7. Do Not Run `fldataprofiler fit`
+AI agents must **NEVER** execute `fldataprofiler fit` (or `uv run fldataprofiler fit ...`) commands, as running profiling on full datasets can consume excessive RAM (gigabytes) and long computation time. Use fast, targeted unit tests in `tests/` with small synthetic test fixtures instead.\n
 # Project Structure
 
 ```text
@@ -137,6 +140,7 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
 │   ├── permutation_importance_ts.md  # Time-series permutation importance docs.
 │   ├── probability.md                # 20-bin Quantile Conditional Probability & WoE/IV docs.
 │   ├── probability_2d.md             # 2D Joint Probability Heatmap & Sweet Spots docs.
+│   ├── probability_coverage.md       # 2D High-Probability Region & Matrix Coverage docs.
 │   ├── probability_3d.md             # 3D Joint Probability & Hyper Sweet Spots docs.
 │   ├── probability_bayes.md          # Bayesian Probability & Credible Intervals docs.
 │   ├── probability_drift.md          # Probability drift, PSI & Alpha stability docs.
@@ -171,7 +175,7 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
 │       ├── registry.py               # Module registry and factory.
 │       ├── utils.py                  # Data ingestion, indexing, and rendering helpers.
 │   │
-│   └── modules/                      # 29 Profiling Module Implementations.
+│   └── modules/                      # 30 Profiling Module Implementations.
 │       ├── __init__.py               # Module package marker.
 │       ├── base.py                   # ProfilingModule protocol & ModuleResult.
 │       ├── progress.py               # Shared progress reporting bar.
@@ -191,6 +195,7 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
 │       ├── permutation_importance_ts.py # Time-series permutation module.
 │       ├── probability.py            # 20-bin Quantile Conditional Probability & WoE/IV module.
 │       ├── probability_2d.py         # 2D Joint Probability Heatmap & Sweet Spots module.
+│       ├── probability_coverage.py   # 2D High-Probability Region & Matrix Coverage module.
 │       ├── probability_3d.py         # 3D Joint Probability & Hyper Sweet Spots module.
 │       ├── probability_bayes.py      # Bayesian Probability & Credible Intervals module.
 │       ├── probability_drift.py      # Probability drift, PSI & Alpha stability module.
@@ -229,6 +234,7 @@ AI agents must **NOT** execute `git commit` commands automatically without expli
     ├── test_kmean.py                 # Tests for KMeans module.
     ├── test_probability.py           # Tests for probability module.
     ├── test_probability_2d.py        # Tests for probability_2d module.
+    ├── test_probability_coverage.py  # Tests for probability_coverage module.
     ├── test_probability_3d.py        # Tests for probability_3d module.
     ├── test_probability_bayes.py     # Tests for probability_bayes module.
     ├── test_probability_drift.py     # Tests for probability_drift module.

@@ -20,6 +20,7 @@ fl-data-profiling
 │   ├── probability_bayes        : Xác suất Bayes (Beta/Dirichlet), Co Bayes (Shrinkage), 95% CI & Bayes Factor
 │   ├── probability_kellycriterion: Tỷ lệ phân bổ vốn Kelly (Full/Half-Kelly), Expected Value (EV) & Edge
 │   ├── probability_2d           : Ma trận nhiệt xác suất kết hợp 2D (10x10 grid), Synergy Gain & Sweet Spots
+│   ├── probability_coverage     : Độ phủ xác suất cao 2D (Cell Coverage) & Xếp hạng ma trận theo số ô vượt ngưỡng
 │   ├── probability_3d           : Không gian xác suất kết hợp 3D (5x5x5 voxels), 3-Way Synergy & Hyper Sweet Spots
 │   ├── probability_drift        : Đánh giá độ ổn định xác suất chuỗi thời gian, PSI & Regime Inversions
 │   ├── probability_prim         : Bump Hunting (PRIM) đào sâu hộp xác suất cao đa chiều & sinh code Python
@@ -66,6 +67,7 @@ fl-data-profiling
 | `probability_bayes` (hoặc `probabilitybayes`) | [`probability_bayes.md`](probability_bayes.md) | Bayesian Prob | Xác suất Bayes (Beta/Dirichlet), Co Bayes (Shrinkage), 95% Credible Intervals & Bayes Factor |
 | `probability_kellycriterion` (hoặc `probability_kelly`, `kelly`) | [`probability_kellycriterion.md`](probability_kellycriterion.md) | Position Sizing | Tỷ lệ phân bổ vốn Kelly (Full/Half-Kelly), Expected Value ($EV$), Tốc độ tăng trưởng vốn |
 | `probability_2d` (hoặc `probability2d`) | [`probability_2d.md`](probability_2d.md) | Joint Probability | Ma trận nhiệt xác suất kết hợp 2D (10x10 grid), Synergy Gain & Sweet Spots |
+| `probability_coverage` (hoặc `coverage`, `probabilitycoverage`) | [`probability_coverage.md`](probability_coverage.md) | Matrix Coverage | Phân tích độ phủ 2D & Sắp xếp ma trận theo số lượng ô đạt xác suất cao $P \ge \text{min\_x}$ |
 | `probability_3d` (hoặc `probability3d`) | [`probability_3d.md`](probability_3d.md) | 3D Probability | Không gian xác suất kết hợp 3D (5x5x5 voxels), 3-Way Synergy & Hyper Sweet Spots |
 | `probability_drift` | [`probability_drift.md`](probability_drift.md) | Alpha Stability | Đánh giá độ ổn định xác suất chuỗi thời gian, PSI, IV Decay & Regime Flips |
 | `probability_prim` (hoặc `prim`, `bump_hunting`) | [`probability_prim.md`](probability_prim.md) | Bump Hunting | Patient Rule Induction Method (PRIM) đào sâu hộp xác suất cao đa chiều, sinh code Python |

@@ -19,7 +19,7 @@
 ## 2. Project-Wide Default Configuration (`config.default.json`)
 
 The package includes a built-in `config.default.json` bundled directly into the distribution:
-- **Global Settings**: `output_dir`, `max_rows`, `random_state`.
+- **Global Settings**: `output_dir`, `max_rows`, `random_state`, `min_non_null`, `max_label_classes`.
 - **Prune Settings**: `max_corr`, `corr_method`, `max_null`, `min_variance`, `auto_drop_raw_levels`.
 - **Module Settings**: `probability_prim`, `probability_markov`, `probability_scorecard`, `xgboost`, `lightgbm`, etc.
 
