@@ -16,7 +16,7 @@ import pandas as pd
 
 from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
-from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.progress import ModuleProgress, StatusTimer
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -89,6 +89,7 @@ def _compute_1d_iv_and_spread(
     x: pd.Series,
     y: pd.Series,
     n_bins: int = DEFAULT_N_BINS,
+    precomputed_bins: pd.Series | None = None,
 ) -> dict[object, dict[str, float]]:
     """Compute 1D Information Value and Probability Spread for each class of target y."""
     clean_x = _numeric_series(x)
@@ -99,49 +100,39 @@ def _compute_1d_iv_and_spread(
     if len(x_val) < 2 or y_val.nunique(dropna=True) < 2 or x_val.nunique(dropna=True) < 2:
         return {}
 
-    bins = _compute_quantile_bins(x_val, n_bins=n_bins)
-    df = pd.DataFrame({"x": x_val, "y": y_val, "bin": bins})
-    n_total = len(df)
-    unique_classes = sorted(df["y"].unique(), key=lambda v: str(v))
-    bin_indices = sorted(df["bin"].unique())
+    if precomputed_bins is not None:
+        bins = precomputed_bins[valid_mask]
+    else:
+        bins = _compute_quantile_bins(x_val, n_bins=n_bins)
 
-    bin_counts: dict[int, int] = {}
-    bin_class_counts: dict[int, dict[object, int]] = {}
-    for k in bin_indices:
-        bin_df = df[df["bin"] == k]
-        n_k = len(bin_df)
-        bin_counts[k] = n_k
-        bin_class_counts[k] = {c: int((bin_df["y"] == c).sum()) for c in unique_classes}
+    ct = pd.crosstab(bins, y_val)
+    if ct.empty:
+        return {}
+
+    n_total = len(x_val)
+    bin_totals = ct.sum(axis=1).values.astype(float)
+    unique_classes = sorted(ct.columns, key=lambda v: str(v))
 
     result: dict[object, dict[str, float]] = {}
     for c in unique_classes:
-        total_events = int((df["y"] == c).sum())
-        total_non_events = n_total - total_events
+        events_k = ct[c].values.astype(float)
+        non_events_k = bin_totals - events_k
+        total_events = float(events_k.sum())
+        total_non_events = float(n_total - total_events)
 
-        probs: list[float] = []
-        iv_total = 0.0
+        if total_events <= 0 or total_non_events <= 0:
+            continue
 
-        for k in bin_indices:
-            n_k = bin_counts.get(k, 0)
-            if n_k == 0:
-                continue
-            events_k = bin_class_counts[k].get(c, 0)
-            non_events_k = n_k - events_k
-            prob_k = events_k / n_k if n_k > 0 else 0.0
-            probs.append(prob_k)
+        probs = events_k / np.maximum(bin_totals, 1.0)
+        dist_event = events_k / total_events
+        dist_non_event = non_events_k / total_non_events
 
-            dist_event = events_k / total_events if total_events > 0 else 0.0
-            dist_non_event = non_events_k / total_non_events if total_non_events > 0 else 0.0
+        p_e = np.maximum(dist_event, EPSILON)
+        p_ne = np.maximum(dist_non_event, EPSILON)
+        woe_k = np.log(p_e / p_ne)
+        iv_total = float(np.sum((dist_event - dist_non_event) * woe_k))
 
-            p_e = max(dist_event, EPSILON)
-            p_ne = max(dist_non_event, EPSILON)
-            woe_k = float(np.log(p_e / p_ne))
-            iv_k = float((dist_event - dist_non_event) * woe_k)
-            iv_total += iv_k
-
-        prob_arr = np.array(probs, dtype=float)
-        spread = float(prob_arr.max() - prob_arr.min()) if len(prob_arr) > 0 else 0.0
-
+        spread = float(probs.max() - probs.min()) if len(probs) > 0 else 0.0
         result[c] = {
             "iv": iv_total,
             "prob_spread": spread,
@@ -156,21 +147,48 @@ def _prescreen_candidate_features(
     valid_targets: list[str],
     max_candidates: int,
     n_bins: int,
+    progress: bool = False,
+    module_name: str = "probability_3d",
 ) -> tuple[list[str], dict[str, dict[str, dict[object, dict[str, float]]]]]:
     """Screen top features by 1D Information Value (IV) across targets."""
     feature_1d_stats: dict[str, dict[str, dict[object, dict[str, float]]]] = {}
     feature_max_iv: dict[str, float] = {}
 
-    for f in numeric_features:
-        feature_1d_stats[f] = {}
-        max_iv_f = 0.0
-        for t in valid_targets:
-            stats_dict = _compute_1d_iv_and_spread(model_frame[f], model_frame[t], n_bins=n_bins)
-            feature_1d_stats[f][t] = stats_dict
-            for m in stats_dict.values():
-                if m["iv"] > max_iv_f:
-                    max_iv_f = m["iv"]
-        feature_max_iv[f] = max_iv_f
+    show_progress = progress and len(numeric_features) > 20
+    ps_bar = (
+        ModuleProgress(
+            f"{module_name} (prescreen)",
+            total=len(numeric_features),
+            unit="feat",
+            enabled=True,
+        )
+        if show_progress
+        else None
+    )
+    if ps_bar:
+        ps_bar.__enter__()
+
+    try:
+        for f in numeric_features:
+            feature_1d_stats[f] = {}
+            max_iv_f = 0.0
+            clean_x = _numeric_series(model_frame[f])
+            bins = _compute_quantile_bins(clean_x, n_bins=n_bins)
+
+            for t in valid_targets:
+                stats_dict = _compute_1d_iv_and_spread(
+                    clean_x, model_frame[t], n_bins=n_bins, precomputed_bins=bins
+                )
+                feature_1d_stats[f][t] = stats_dict
+                for m in stats_dict.values():
+                    if m["iv"] > max_iv_f:
+                        max_iv_f = m["iv"]
+            feature_max_iv[f] = max_iv_f
+            if ps_bar:
+                ps_bar.step(f)
+    finally:
+        if ps_bar:
+            ps_bar.__exit__(None, None, None)
 
     sorted_features = sorted(numeric_features, key=lambda f: feature_max_iv.get(f, 0.0), reverse=True)
     candidate_features = sorted_features[:max_candidates]
@@ -740,7 +758,7 @@ class Probability3DModule:
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+        with StatusTimer(f"{self.name}: Loading & pre-screening", enabled=self.progress):
             features = _read_table_with_date_index(feature_csv)
             labels = _read_table_with_date_index(label_csv)
             merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -767,7 +785,6 @@ class Probability3DModule:
                 MAX_ROWS,
                 RANDOM_STATE,
             ) if valid_targets and numeric_features else merged
-            progress_bar.step("load")
 
             candidate_features, feature_1d_stats = _prescreen_candidate_features(
                 model_frame,
@@ -778,9 +795,14 @@ class Probability3DModule:
             )
 
             feature_triplets = list(itertools.combinations(candidate_features, 3))
-            all_triplet_scores: list[dict[str, object]] = []
-            all_voxel_rows: list[dict[str, object]] = []
+            total_evals = len(feature_triplets) * len(valid_targets)
 
+        all_triplet_scores: list[dict[str, object]] = []
+        all_voxel_rows: list[dict[str, object]] = []
+
+        with ModuleProgress(
+            self.name, total=max(1, total_evals), unit="triplet", enabled=self.progress
+        ) as progress_bar:
             for f1, f2, f3 in feature_triplets:
                 for target_col in valid_targets:
                     f1_stats = feature_1d_stats.get(f1, {}).get(target_col, {})
@@ -804,140 +826,139 @@ class Probability3DModule:
                     )
                     all_triplet_scores.extend(triplet_scores)
                     all_voxel_rows.extend(voxel_rows)
+                    progress_bar.step(f"{f1}->{target_col}")
 
-            triplet_scores_df = pd.DataFrame(all_triplet_scores)
-            voxel_df = pd.DataFrame(all_voxel_rows)
+            if total_evals == 0:
+                progress_bar.step("no_valid_triplets")
 
-            if not triplet_scores_df.empty:
-                triplet_scores_df = triplet_scores_df.sort_values(
-                    ["synergy_gain", "iv_3d"],
-                    ascending=[False, False],
-                ).reset_index(drop=True)
+        triplet_scores_df = pd.DataFrame(all_triplet_scores)
+        voxel_df = pd.DataFrame(all_voxel_rows)
 
-            progress_bar.step("probabilities_3d")
+        if not triplet_scores_df.empty:
+            triplet_scores_df = triplet_scores_df.sort_values(
+                ["synergy_gain", "iv_3d"],
+                ascending=[False, False],
+            ).reset_index(drop=True)
 
-            plot_path = run_dir / "probability_3d_heatmaps.png"
-            _generate_probability_3d_heatmaps(
-                all_triplet_scores,
-                all_voxel_rows,
-                plot_path,
-                n_bins=self.n_bins,
-            )
-            progress_bar.step("heatmaps")
+        plot_path = run_dir / "probability_3d_heatmaps.png"
+        _generate_probability_3d_heatmaps(
+            all_triplet_scores,
+            all_voxel_rows,
+            plot_path,
+            n_bins=self.n_bins,
+        )
 
-            metadata = Probability3DRunMetadata(
-                module=self.name,
-                created_at=datetime.now(UTC).isoformat(),
-                execution_time=_format_duration(time.perf_counter() - start_time),
-                feature_csv=str(feature_csv),
-                label_csv=str(label_csv),
-                join_strategy=join_strategy,
-                feature_shape=DatasetShape(*features.shape),
-                label_shape=DatasetShape(*labels.shape),
-                merged_shape=DatasetShape(*merged.shape),
-                n_bins=self.n_bins,
-                max_candidates=self.max_candidates,
-                min_support=self.min_support,
-                features_count=len(numeric_features),
-                candidate_features=candidate_features,
-                triplets_evaluated=len(feature_triplets),
-                targets=valid_targets,
-                model_rows=len(model_frame),
-            )
+        metadata = Probability3DRunMetadata(
+            module=self.name,
+            created_at=datetime.now(UTC).isoformat(),
+            execution_time=_format_duration(time.perf_counter() - start_time),
+            feature_csv=str(feature_csv),
+            label_csv=str(label_csv),
+            join_strategy=join_strategy,
+            feature_shape=DatasetShape(*features.shape),
+            label_shape=DatasetShape(*labels.shape),
+            merged_shape=DatasetShape(*merged.shape),
+            n_bins=self.n_bins,
+            max_candidates=self.max_candidates,
+            min_support=self.min_support,
+            features_count=len(numeric_features),
+            candidate_features=candidate_features,
+            triplets_evaluated=len(feature_triplets),
+            targets=valid_targets,
+            model_rows=len(model_frame),
+        )
 
-            _write_csv(run_dir / "triplet_probability_scores.csv", triplet_scores_df)
-            _write_csv(run_dir / "voxel_conditional_probabilities.csv", voxel_df)
+        _write_csv(run_dir / "triplet_probability_scores.csv", triplet_scores_df)
+        _write_csv(run_dir / "voxel_conditional_probabilities.csv", voxel_df)
 
-            max_synergy = float(triplet_scores_df["synergy_gain"].max()) if not triplet_scores_df.empty else 0.0
-            max_iv_3d = float(triplet_scores_df["iv_3d"].max()) if not triplet_scores_df.empty else 0.0
-            max_prob = float(triplet_scores_df["sweet_spot_prob"].max()) if not triplet_scores_df.empty else 0.0
-            max_lift = float(triplet_scores_df["sweet_spot_lift"].max()) if not triplet_scores_df.empty else 1.0
+        max_synergy = float(triplet_scores_df["synergy_gain"].max()) if not triplet_scores_df.empty else 0.0
+        max_prob = float(triplet_scores_df["sweet_spot_prob"].max()) if not triplet_scores_df.empty else 0.0
+        max_lift = float(triplet_scores_df["sweet_spot_lift"].max()) if not triplet_scores_df.empty else 1.0
 
-            summary_metrics = {
-                "features_evaluated": len(numeric_features),
-                "candidate_features": len(candidate_features),
-                "triplets_evaluated": len(feature_triplets),
-                "targets_evaluated": len(valid_targets),
-                "max_synergy_gain": _round(max_synergy),
-                "max_iv_3d": _round(max_iv_3d),
-                "max_sweet_spot_prob": _round(max_prob),
-                "max_lift": _round(max_lift),
-            }
+        summary_metrics = {
+            "features_evaluated": len(numeric_features),
+            "candidate_features": len(candidate_features),
+            "triplets_evaluated": len(feature_triplets),
+            "targets_evaluated": len(valid_targets),
+            "max_synergy_gain": _round(max_synergy),
+            "max_iv_3d": _round(float(triplet_scores_df["iv_3d"].max())) if not triplet_scores_df.empty else 0.0,
+            "max_sweet_spot_prob": _round(max_prob),
+            "max_lift": _round(max_lift),
+        }
 
-            summary_payload: dict[str, object] = {
-                **asdict(metadata),
-                "top_triplets": triplet_scores_df.head(10).to_dict(orient="records")
-                if not triplet_scores_df.empty
-                else [],
-                "top_sweet_spots": triplet_scores_df.sort_values("sweet_spot_prob", ascending=False)
-                .head(10)
-                .to_dict(orient="records")
-                if not triplet_scores_df.empty
-                else [],
-                "summary_metrics": summary_metrics,
-            }
-            _write_json(run_dir / "summary.json", summary_payload)
+        summary_payload: dict[str, object] = {
+            **asdict(metadata),
+            "top_triplets": triplet_scores_df.head(10).to_dict(orient="records")
+            if not triplet_scores_df.empty
+            else [],
+            "top_sweet_spots": triplet_scores_df.sort_values("sweet_spot_prob", ascending=False)
+            .head(10)
+            .to_dict(orient="records")
+            if not triplet_scores_df.empty
+            else [],
+            "summary_metrics": summary_metrics,
+        }
+        _write_json(run_dir / "summary.json", summary_payload)
 
-            # Generate report.md
-            sorted_sweet_spots = (
-                triplet_scores_df.sort_values(["sweet_spot_lift", "sweet_spot_prob"], ascending=[False, False])
-                .head(10)
-                .to_dict(orient="records")
-                if not triplet_scores_df.empty
-                else []
-            )
+        # Generate report.md
+        sorted_sweet_spots = (
+            triplet_scores_df.sort_values(["sweet_spot_lift", "sweet_spot_prob"], ascending=[False, False])
+            .head(10)
+            .to_dict(orient="records")
+            if not triplet_scores_df.empty
+            else []
+        )
 
-            report_md_lines = [
-                "# 3D Joint Probability & Sweet Spots Report",
-                "",
-                "## Executive Summary",
-                "",
-                f"- **Triplets Evaluated**: `{len(feature_triplets)}` combinations across `{len(candidate_features)}` pre-screened candidate features.",
-                f"- **Max Synergy Gain**: `+{max_synergy:.4f}` (3-way interaction probability lift over single feature baselines).",
-                f"- **Peak Sweet Spot Probability**: `{max_prob:.1%}` with maximum lift `{max_lift:.2f}x`.",
-                "",
-                "## Run Metadata",
-                "",
-                _markdown_table(
-                    pd.DataFrame(
-                        [
-                            {"Metric": "Module", "Value": metadata.module},
-                            {"Metric": "Execution Time", "Value": metadata.execution_time},
-                            {"Metric": "Quantile Bins (per dimension)", "Value": metadata.n_bins},
-                            {"Metric": "Total Voxels per Triplet", "Value": metadata.n_bins ** 3},
-                            {"Metric": "Candidate Features", "Value": metadata.max_candidates},
-                            {"Metric": "Minimum Voxel Support", "Value": metadata.min_support},
-                            {"Metric": "Triplets Evaluated", "Value": metadata.triplets_evaluated},
-                            {"Metric": "Rows Evaluated", "Value": metadata.model_rows},
-                        ]
-                    )
-                ),
-                "",
-                "## Top 3D Synergistic Triplets (F1 x F2 x F3)",
-                "",
-                _markdown_table(triplet_scores_df.head(15)) if not triplet_scores_df.empty else "No triplets evaluated.",
-                "",
-                "## Top Actionable 3D Sweet Spot Rules",
-                "",
-                _markdown_table(pd.DataFrame(sorted_sweet_spots)) if sorted_sweet_spots else "No sweet spots extracted.",
-                "",
-                "## Sliced 3D Quantile Heatmaps",
-                "",
-                "![3D Probability Heatmaps](probability_3d_heatmaps.png)",
-                "",
-                "## Artifacts",
-                "",
-                "- `summary.json`",
-                "- `triplet_probability_scores.csv`",
-                "- `voxel_conditional_probabilities.csv`",
-                "- `probability_3d_heatmaps.png`",
-                "- `report.html`",
-                "",
-            ]
+        report_md_lines = [
+            "# 3D Joint Probability & Sweet Spots Report",
+            "",
+            "## Executive Summary",
+            "",
+            f"- **Triplets Evaluated**: `{len(feature_triplets)}` combinations across `{len(candidate_features)}` pre-screened candidate features.",
+            f"- **Max Synergy Gain**: `+{max_synergy:.4f}` (3-way interaction probability lift over single feature baselines).",
+            f"- **Peak Sweet Spot Probability**: `{max_prob:.1%}` with maximum lift `{max_lift:.2f}x`.",
+            "",
+            "## Run Metadata",
+            "",
+            _markdown_table(
+                pd.DataFrame(
+                    [
+                        {"Metric": "Module", "Value": metadata.module},
+                        {"Metric": "Execution Time", "Value": metadata.execution_time},
+                        {"Metric": "Quantile Bins (per dimension)", "Value": metadata.n_bins},
+                        {"Metric": "Total Voxels per Triplet", "Value": metadata.n_bins ** 3},
+                        {"Metric": "Candidate Features", "Value": metadata.max_candidates},
+                        {"Metric": "Minimum Voxel Support", "Value": metadata.min_support},
+                        {"Metric": "Triplets Evaluated", "Value": metadata.triplets_evaluated},
+                        {"Metric": "Rows Evaluated", "Value": metadata.model_rows},
+                    ]
+                )
+            ),
+            "",
+            "## Top 3D Synergistic Triplets (F1 x F2 x F3)",
+            "",
+            _markdown_table(triplet_scores_df.head(15)) if not triplet_scores_df.empty else "No triplets evaluated.",
+            "",
+            "## Top Actionable 3D Sweet Spot Rules",
+            "",
+            _markdown_table(pd.DataFrame(sorted_sweet_spots)) if sorted_sweet_spots else "No sweet spots extracted.",
+            "",
+            "## Sliced 3D Quantile Heatmaps",
+            "",
+            "![3D Probability Heatmaps](probability_3d_heatmaps.png)",
+            "",
+            "## Artifacts",
+            "",
+            "- `summary.json`",
+            "- `triplet_probability_scores.csv`",
+            "- `voxel_conditional_probabilities.csv`",
+            "- `probability_3d_heatmaps.png`",
+            "- `report.html`",
+            "",
+        ]
 
-            (run_dir / "report.md").write_text("\n".join(report_md_lines), encoding="utf-8")
-            _render_report_html(metadata, all_triplet_scores, all_voxel_rows, summary_metrics, run_dir)
-            progress_bar.step("reports")
+        (run_dir / "report.md").write_text("\n".join(report_md_lines), encoding="utf-8")
+        _render_report_html(metadata, all_triplet_scores, all_voxel_rows, summary_metrics, run_dir)
 
         return ModuleResult(
             report_dir=run_dir,

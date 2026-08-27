@@ -82,32 +82,36 @@ class BorutaRelationshipsModule:
         targets: list[str] | None = None,
     ) -> ModuleResult:
         start_time = time.perf_counter()
-        with ModuleProgress(self.name, total=3, enabled=self.progress) as progress_bar:
-            features = _read_table_with_date_index(feature_csv)
-            labels = _read_table_with_date_index(label_csv)
-            merged, feature_columns, label_columns, join_strategy = _merge_inputs(
-                features, labels, join_key
-            )
+        features = _read_table_with_date_index(feature_csv)
+        labels = _read_table_with_date_index(label_csv)
+        merged, feature_columns, label_columns, join_strategy = _merge_inputs(
+            features, labels, join_key
+        )
 
-            ignored_columns = _date_columns([*feature_columns, *label_columns])
-            feature_columns = [column for column in feature_columns if column not in ignored_columns]
-            label_columns = [column for column in label_columns if column not in ignored_columns]
-            selected_targets = _select_targets(label_columns, targets)
-            numeric_features = _numeric_feature_columns(merged, feature_columns)
+        ignored_columns = _date_columns([*feature_columns, *label_columns])
+        feature_columns = [column for column in feature_columns if column not in ignored_columns]
+        label_columns = [column for column in label_columns if column not in ignored_columns]
+        selected_targets = _select_targets(label_columns, targets)
+        numeric_features = _numeric_feature_columns(merged, feature_columns)
 
-            model_frame = _sample_rows(
-                merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
-            )
-            run_dir = output_dir / self.name
-            run_dir.mkdir(parents=True, exist_ok=True)
+        model_frame = _sample_rows(
+            merged[[*numeric_features, *selected_targets]], MAX_ROWS, RANDOM_STATE
+        )
+        run_dir = output_dir / self.name
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        total_evals = len(selected_targets) * BORUTA_ITERATIONS
+        total_steps = total_evals + 2 if total_evals > 0 else 3
+
+        with ModuleProgress(self.name, total=total_steps, enabled=self.progress) as progress_bar:
             progress_bar.step("load")
 
             model_results, selections = _fit_target_models(
                 model_frame,
                 numeric_features,
                 selected_targets,
+                progress_bar=progress_bar,
             )
-            progress_bar.step("fit_models")
 
             metadata = BorutaRunMetadata(
                 module=self.name,
@@ -154,12 +158,17 @@ class BorutaRelationshipsModule:
 
 
 def _fit_target_models(
-    merged: pd.DataFrame, feature_columns: list[str], label_columns: list[str]
+    merged: pd.DataFrame,
+    feature_columns: list[str],
+    label_columns: list[str],
+    progress_bar: ModuleProgress | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     result_rows: list[dict[str, object]] = []
     selection_rows: list[dict[str, object]] = []
 
     if not feature_columns:
+        if progress_bar is not None and label_columns:
+            progress_bar.step("no_features", n=len(label_columns) * BORUTA_ITERATIONS)
         return _model_results_frame(result_rows), _selection_frame(selection_rows)
 
     x = merged[feature_columns].apply(_numeric_series)
@@ -171,9 +180,9 @@ def _fit_target_models(
             y_numeric.notna().sum() >= 10 and y_numeric.nunique(dropna=True) > MAX_CLASS_COUNT
         )
         if is_numeric_target:
-            result, selections = _fit_regression(label, x, y_numeric)
+            result, selections = _fit_regression(label, x, y_numeric, progress_bar=progress_bar)
         else:
-            result, selections = _fit_classification(label, x, y_raw)
+            result, selections = _fit_classification(label, x, y_raw, progress_bar=progress_bar)
 
         if result is not None:
             result_rows.append(result)
@@ -183,10 +192,15 @@ def _fit_target_models(
 
 
 def _fit_regression(
-    label: str, features: pd.DataFrame, target: pd.Series
+    label: str,
+    features: pd.DataFrame,
+    target: pd.Series,
+    progress_bar: ModuleProgress | None = None,
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
     if len(frame) < 30 or frame[label].nunique() < 2:
+        if progress_bar is not None:
+            progress_bar.step(f"{label} (skipped)", n=BORUTA_ITERATIONS)
         return None, []
 
     x = frame[features.columns]
@@ -206,7 +220,7 @@ def _fit_regression(
     x_test_imputed = pd.DataFrame(imputer.transform(x_test), columns=x.columns)
     model.fit(x_train_imputed, y_train)
     predictions = model.predict(x_test_imputed)
-    selections = _boruta_select(label, "regression", x, y)
+    selections = _boruta_select(label, "regression", x, y, progress_bar=progress_bar)
     rmse = float(np.sqrt(mean_squared_error(y_test, predictions)))
     return (
         {
@@ -229,16 +243,23 @@ def _fit_regression(
 
 
 def _fit_classification(
-    label: str, features: pd.DataFrame, target: pd.Series
+    label: str,
+    features: pd.DataFrame,
+    target: pd.Series,
+    progress_bar: ModuleProgress | None = None,
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     frame = pd.concat([features, target.rename(label)], axis=1).dropna(subset=[label])
     class_count = int(frame[label].nunique(dropna=True))
     if len(frame) < 30 or class_count < 2 or class_count > MAX_CLASS_COUNT:
+        if progress_bar is not None:
+            progress_bar.step(f"{label} (skipped)", n=BORUTA_ITERATIONS)
         return None, []
 
     encoder = LabelEncoder()
     y = encoder.fit_transform(frame[label].astype(str))
     if np.min(np.bincount(y)) < 2:
+        if progress_bar is not None:
+            progress_bar.step(f"{label} (skipped)", n=BORUTA_ITERATIONS)
         return None, []
 
     x_train, x_test, y_train, y_test = train_test_split(
@@ -261,7 +282,7 @@ def _fit_classification(
     x_test_imputed = pd.DataFrame(imputer.transform(x_test), columns=features.columns)
     model.fit(x_train_imputed, y_train)
     predictions = model.predict(x_test_imputed)
-    selections = _boruta_select(label, "classification", frame[features.columns], y)
+    selections = _boruta_select(label, "classification", frame[features.columns], y, progress_bar=progress_bar)
     return (
         {
             "label": label,
@@ -283,7 +304,11 @@ def _fit_classification(
 
 
 def _boruta_select(
-    label: str, task: str, features: pd.DataFrame, target: pd.Series | np.ndarray
+    label: str,
+    task: str,
+    features: pd.DataFrame,
+    target: pd.Series | np.ndarray,
+    progress_bar: ModuleProgress | None = None,
 ) -> list[dict[str, object]]:
     rng = np.random.default_rng(RANDOM_STATE)
     imputer = SimpleImputer(strategy="median")
@@ -304,6 +329,8 @@ def _boruta_select(
         hit_counts += real_importances > shadow_threshold
         mean_importance += real_importances
         mean_shadow_threshold += shadow_threshold
+        if progress_bar is not None:
+            progress_bar.step(f"{label} iter {iteration+1}/{BORUTA_ITERATIONS}")
 
     mean_importance /= BORUTA_ITERATIONS
     mean_shadow_threshold /= BORUTA_ITERATIONS

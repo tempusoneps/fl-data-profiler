@@ -14,7 +14,7 @@ import pandas as pd
 
 from fldataprofiler.config import get_global_config, get_module_config
 from fldataprofiler.modules.base import ModuleResult
-from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.progress import ModuleProgress, StatusTimer
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -833,6 +833,9 @@ class ProbabilityCoverageModule:
     name: str = "probability_coverage"
     description: str = "1 Feature x 1 Label Quantile Crosstab Coverage & Threshold Ranking"
 
+    def __init__(self, progress: bool | None = None) -> None:
+        self.progress = progress
+
     def run(
         self,
         feature_csv: Path,
@@ -883,17 +886,16 @@ class ProbabilityCoverageModule:
             ),
         )
 
-        # Filter valid discrete targets (2 to max_label_classes unique values)
-        valid_discrete_targets: list[str] = []
-        for tgt in selected_targets:
-            target_series = sampled_df[tgt].dropna()
-            if 2 <= target_series.nunique() <= cfg.max_label_classes:
-                valid_discrete_targets.append(tgt)
+        with StatusTimer(f"{self.name}: Loading & pre-binning", enabled=self.progress):
+            # Filter valid discrete targets (2 to max_label_classes unique values)
+            valid_discrete_targets: list[str] = []
+            for tgt in selected_targets:
+                target_series = sampled_df[tgt].dropna()
+                if 2 <= target_series.nunique() <= cfg.max_label_classes:
+                    valid_discrete_targets.append(tgt)
 
-        numeric_feature_cols = _numeric_feature_columns(sampled_df, feature_cols)
+            numeric_feature_cols = _numeric_feature_columns(sampled_df, feature_cols)
 
-        with ModuleProgress(self.name, total=4) as progress_bar:
-            progress_bar.step("Pre-binning numeric features into quantiles")
             binned_features: dict[str, pd.Series] = {}
             feature_bin_ranges: dict[str, dict[int, tuple[float, float]]] = {}
 
@@ -922,11 +924,15 @@ class ProbabilityCoverageModule:
                             ranges[b] = (np.nan, np.nan)
                     feature_bin_ranges[col] = ranges
 
-            progress_bar.step("Evaluating 1 Feature x 1 Label crosstabs")
-            matrix_summaries: list[dict[str, object]] = []
-            all_feature_class_summaries: list[dict[str, object]] = []
-            all_cell_details: list[dict[str, object]] = []
+            total_evals = len(valid_discrete_targets) * sum(1 for col in numeric_feature_cols if col in binned_features)
 
+        matrix_summaries: list[dict[str, object]] = []
+        all_feature_class_summaries: list[dict[str, object]] = []
+        all_cell_details: list[dict[str, object]] = []
+
+        with ModuleProgress(
+            self.name, total=max(1, total_evals), unit="matrix", enabled=self.progress
+        ) as progress_bar:
             for target in valid_discrete_targets:
                 target_series = sampled_df[target]
 
@@ -952,136 +958,138 @@ class ProbabilityCoverageModule:
                         matrix_summaries.append(m_sum)
                     all_feature_class_summaries.extend(f_cls_sum)
                     all_cell_details.extend(c_det)
+                    progress_bar.step(f"{col}->{target}")
 
-            progress_bar.step("Ranking matrices by coverage count")
-            # Sort primary by qualified_cells descending, secondary by sample_coverage_pct, tertiary by peak_probability
-            matrix_summaries.sort(
-                key=lambda m: (m["qualified_cells"], m["sample_coverage_pct"], m["peak_probability"]),
-                reverse=True,
-            )
+            if total_evals == 0:
+                progress_bar.step("no_valid_crosstabs")
 
-            feature_scores_df = (
-                pd.DataFrame(all_feature_class_summaries).sort_values(
-                    ["qualified_bins", "sample_coverage_pct", "weighted_qualified_prob"],
-                    ascending=[False, False, False],
-                ).reset_index(drop=True)
-                if all_feature_class_summaries
-                else pd.DataFrame(columns=[
-                    "feature", "target", "target_class", "samples", "base_rate",
-                    "min_probability_threshold", "qualified_bins", "total_bins",
-                    "bin_coverage_pct", "qualified_samples", "sample_coverage_pct",
-                    "weighted_qualified_prob", "mean_qualified_prob", "min_qualified_prob",
-                    "max_bin_prob", "best_bin", "mean_lift", "composite_coverage_score",
-                    "coverage_rule",
-                ])
-            )
+        # Sort primary by qualified_cells descending, secondary by sample_coverage_pct, tertiary by peak_probability
+        matrix_summaries.sort(
+            key=lambda m: (m["qualified_cells"], m["sample_coverage_pct"], m["peak_probability"]),
+            reverse=True,
+        )
 
-            cell_df = pd.DataFrame(all_cell_details) if all_cell_details else pd.DataFrame(columns=[
-                "feature", "target", "target_class", "bin", "val_min", "val_max",
-                "samples", "events", "conditional_prob", "conditional_prob_pct",
-                "base_rate", "base_rate_pct", "lift", "is_qualified",
+        feature_scores_df = (
+            pd.DataFrame(all_feature_class_summaries).sort_values(
+                ["qualified_bins", "sample_coverage_pct", "weighted_qualified_prob"],
+                ascending=[False, False, False],
+            ).reset_index(drop=True)
+            if all_feature_class_summaries
+            else pd.DataFrame(columns=[
+                "feature", "target", "target_class", "samples", "base_rate",
+                "min_probability_threshold", "qualified_bins", "total_bins",
+                "bin_coverage_pct", "qualified_samples", "sample_coverage_pct",
+                "weighted_qualified_prob", "mean_qualified_prob", "min_qualified_prob",
+                "max_bin_prob", "best_bin", "mean_lift", "composite_coverage_score",
+                "coverage_rule",
             ])
+        )
 
-            img_path = run_dir / "probability_coverage_distribution.png"
-            _plot_feature_coverage_charts(
-                matrix_summaries=matrix_summaries,
-                cell_df=cell_df,
-                output_path=img_path,
-                min_probability=cfg.min_probability,
-                top_n=6,
-            )
+        cell_df = pd.DataFrame(all_cell_details) if all_cell_details else pd.DataFrame(columns=[
+            "feature", "target", "target_class", "bin", "val_min", "val_max",
+            "samples", "events", "conditional_prob", "conditional_prob_pct",
+            "base_rate", "base_rate_pct", "lift", "is_qualified",
+        ])
 
-            progress_bar.step("Writing reports and summaries")
-            feature_scores_path = _write_csv(run_dir / "feature_coverage_scores.csv", feature_scores_df)
-            cell_details_path = _write_csv(run_dir / "quantile_crosstab_probabilities.csv", cell_df)
+        img_path = run_dir / "probability_coverage_distribution.png"
+        _plot_feature_coverage_charts(
+            matrix_summaries=matrix_summaries,
+            cell_df=cell_df,
+            output_path=img_path,
+            min_probability=cfg.min_probability,
+            top_n=6,
+        )
 
-            matrix_export_rows = [
-                {
-                    "rank": rank_i,
-                    "feature": m["feature"],
-                    "target": m["target"],
-                    "qualified_cells": m["qualified_cells"],
-                    "total_matrix_cells": m["total_matrix_cells"],
-                    "qualified_bins": m["qualified_bins"],
-                    "total_bins": m["total_bins"],
-                    "bin_coverage_pct": m["bin_coverage_pct"],
-                    "qualified_samples": m["qualified_samples"],
-                    "sample_coverage_pct": m["sample_coverage_pct"],
-                    "peak_probability": m["peak_probability"],
-                    "dominant_classes": m["dominant_classes"],
-                }
-                for rank_i, m in enumerate(matrix_summaries, 1)
-            ]
-            matrix_scores_path = _write_csv(run_dir / "matrix_coverage_rankings.csv", pd.DataFrame(matrix_export_rows))
+        feature_scores_path = _write_csv(run_dir / "feature_coverage_scores.csv", feature_scores_df)
+        cell_details_path = _write_csv(run_dir / "quantile_crosstab_probabilities.csv", cell_df)
 
-            # Export clean wide-format crosstab matrices per Target
-            per_target_csv_paths: list[Path] = []
-            for target_name in valid_discrete_targets:
-                target_matrices = [m for m in matrix_summaries if m["target"] == target_name]
-                if not target_matrices:
-                    continue
-
-                target_crosstab_rows = []
-                for m in target_matrices:
-                    feat = m["feature"]
-                    for row_dict in m["crosstab_rows"]:
-                        target_crosstab_rows.append({
-                            "feature": feat,
-                            **row_dict,
-                        })
-
-                if target_crosstab_rows:
-                    target_df = pd.DataFrame(target_crosstab_rows)
-                    safe_target_name = "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in target_name)
-                    target_csv_path = _write_csv(run_dir / f"crosstab_matrices_{safe_target_name}.csv", target_df)
-                    per_target_csv_paths.append(target_csv_path)
-
-            duration = _format_duration(time.time() - start_time)
-
-            metadata = ProbabilityCoverageRunMetadata(
-                module=self.name,
-                created_at=now,
-                execution_time=duration,
-                feature_csv=str(feature_csv),
-                label_csv=str(label_csv),
-                join_strategy=join_strategy,
-                feature_shape=feature_shape,
-                label_shape=label_shape,
-                merged_shape=merged_shape,
-                n_quantiles=cfg.n_quantiles,
-                min_probability=cfg.min_probability,
-                min_support=cfg.min_support,
-                min_lift=cfg.min_lift,
-                max_label_classes=cfg.max_label_classes,
-                min_feature_unique_values=cfg.min_feature_unique_values,
-                features_count=len(numeric_feature_cols),
-                features_evaluated=len(binned_features),
-                targets=valid_discrete_targets,
-                model_rows=len(sampled_df),
-            )
-
-            top_matrices_json = matrix_export_rows[:30] if matrix_export_rows else []
-            summary_payload = {
-                "metadata": asdict(metadata),
-                "top_coverage_matrices": top_matrices_json,
+        matrix_export_rows = [
+            {
+                "rank": rank_i,
+                "feature": m["feature"],
+                "target": m["target"],
+                "qualified_cells": m["qualified_cells"],
+                "total_matrix_cells": m["total_matrix_cells"],
+                "qualified_bins": m["qualified_bins"],
+                "total_bins": m["total_bins"],
+                "bin_coverage_pct": m["bin_coverage_pct"],
+                "qualified_samples": m["qualified_samples"],
+                "sample_coverage_pct": m["sample_coverage_pct"],
+                "peak_probability": m["peak_probability"],
+                "dominant_classes": m["dominant_classes"],
             }
-            summary_path = _write_json(run_dir / "summary.json", summary_payload)
+            for rank_i, m in enumerate(matrix_summaries, 1)
+        ]
+        matrix_scores_path = _write_csv(run_dir / "matrix_coverage_rankings.csv", pd.DataFrame(matrix_export_rows))
 
-            report_md_content = _generate_markdown_report(
-                metadata=metadata,
-                matrix_summaries=matrix_summaries,
-                image_rel_path="probability_coverage_distribution.png",
-            )
-            report_md_path = run_dir / "report.md"
-            report_md_path.write_text(report_md_content, encoding="utf-8")
+        # Export clean wide-format crosstab matrices per Target
+        per_target_csv_paths: list[Path] = []
+        for target_name in valid_discrete_targets:
+            target_matrices = [m for m in matrix_summaries if m["target"] == target_name]
+            if not target_matrices:
+                continue
 
-            report_html_content = _generate_html_report(
-                metadata=metadata,
-                matrix_summaries=matrix_summaries,
-                image_rel_path="probability_coverage_distribution.png",
-            )
-            report_html_path = run_dir / "report.html"
-            report_html_path.write_text(report_html_content, encoding="utf-8")
+            target_crosstab_rows = []
+            for m in target_matrices:
+                feat = m["feature"]
+                for row_dict in m["crosstab_rows"]:
+                    target_crosstab_rows.append({
+                        "feature": feat,
+                        **row_dict,
+                    })
+
+            if target_crosstab_rows:
+                target_df = pd.DataFrame(target_crosstab_rows)
+                safe_target_name = "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in target_name)
+                target_csv_path = _write_csv(run_dir / f"crosstab_matrices_{safe_target_name}.csv", target_df)
+                per_target_csv_paths.append(target_csv_path)
+
+        duration = _format_duration(time.time() - start_time)
+
+        metadata = ProbabilityCoverageRunMetadata(
+            module=self.name,
+            created_at=now,
+            execution_time=duration,
+            feature_csv=str(feature_csv),
+            label_csv=str(label_csv),
+            join_strategy=join_strategy,
+            feature_shape=feature_shape,
+            label_shape=label_shape,
+            merged_shape=merged_shape,
+            n_quantiles=cfg.n_quantiles,
+            min_probability=cfg.min_probability,
+            min_support=cfg.min_support,
+            min_lift=cfg.min_lift,
+            max_label_classes=cfg.max_label_classes,
+            min_feature_unique_values=cfg.min_feature_unique_values,
+            features_count=len(numeric_feature_cols),
+            features_evaluated=len(binned_features),
+            targets=valid_discrete_targets,
+            model_rows=len(sampled_df),
+        )
+
+        top_matrices_json = matrix_export_rows[:30] if matrix_export_rows else []
+        summary_payload = {
+            "metadata": asdict(metadata),
+            "top_coverage_matrices": top_matrices_json,
+        }
+        summary_path = _write_json(run_dir / "summary.json", summary_payload)
+
+        report_md_content = _generate_markdown_report(
+            metadata=metadata,
+            matrix_summaries=matrix_summaries,
+            image_rel_path="probability_coverage_distribution.png",
+        )
+        report_md_path = run_dir / "report.md"
+        report_md_path.write_text(report_md_content, encoding="utf-8")
+
+        report_html_content = _generate_html_report(
+            metadata=metadata,
+            matrix_summaries=matrix_summaries,
+            image_rel_path="probability_coverage_distribution.png",
+        )
+        report_html_path = run_dir / "report.html"
+        report_html_path.write_text(report_html_content, encoding="utf-8")
 
         artifacts = [
             report_md_path,

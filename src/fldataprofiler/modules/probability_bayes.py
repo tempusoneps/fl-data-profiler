@@ -14,7 +14,7 @@ import pandas as pd
 from scipy import special, stats
 
 from fldataprofiler.modules.base import ModuleResult
-from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.progress import ModuleProgress, StatusTimer
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -722,7 +722,7 @@ class ProbabilityBayesModule:
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+        with StatusTimer(f"{self.name}: Loading & preparing", enabled=self.progress):
             features = _read_table_with_date_index(feature_csv)
             labels = _read_table_with_date_index(label_csv)
             merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -754,11 +754,15 @@ class ProbabilityBayesModule:
                 if valid_targets and numeric_features
                 else merged
             )
-            progress_bar.step("load")
 
-            all_score_rows: list[dict[str, object]] = []
-            all_quantile_rows: list[dict[str, object]] = []
+            total_evals = len(numeric_features) * len(valid_targets)
 
+        all_score_rows: list[dict[str, object]] = []
+        all_quantile_rows: list[dict[str, object]] = []
+
+        with ModuleProgress(
+            self.name, total=max(1, total_evals), unit="feat", enabled=self.progress
+        ) as progress_bar:
             for feature_col in numeric_features:
                 for target_col in valid_targets:
                     scores, quantiles = _compute_feature_target_bayes_probabilities(
@@ -771,85 +775,85 @@ class ProbabilityBayesModule:
                     )
                     all_score_rows.extend(scores)
                     all_quantile_rows.extend(quantiles)
+                    progress_bar.step(f"{feature_col}->{target_col}")
 
-            scores_df = pd.DataFrame(all_score_rows)
-            quantiles_df = pd.DataFrame(all_quantile_rows)
+            if total_evals == 0:
+                progress_bar.step("no_valid_targets")
 
-            if not scores_df.empty:
-                scores_df = scores_df.sort_values(
-                    ["bayes_information_value", "bayes_prob_spread"],
-                    ascending=[False, False],
-                ).reset_index(drop=True)
+        scores_df = pd.DataFrame(all_score_rows)
+        quantiles_df = pd.DataFrame(all_quantile_rows)
 
-            progress_bar.step("bayes_probabilities")
+        if not scores_df.empty:
+            scores_df = scores_df.sort_values(
+                ["bayes_information_value", "bayes_prob_spread"],
+                ascending=[False, False],
+            ).reset_index(drop=True)
 
-            plot_path = run_dir / "bayes_probability_distribution.png"
-            _plot_bayes_probability_distribution(scores_df, quantiles_df, plot_path)
-            progress_bar.step("plots")
+        plot_path = run_dir / "bayes_probability_distribution.png"
+        _plot_bayes_probability_distribution(scores_df, quantiles_df, plot_path)
 
-            metadata = ProbabilityBayesRunMetadata(
-                module=self.name,
-                created_at=datetime.now(UTC).isoformat(),
-                execution_time=_format_duration(time.perf_counter() - start_time),
-                feature_csv=str(feature_csv),
-                label_csv=str(label_csv),
-                join_strategy=join_strategy,
-                feature_shape=DatasetShape(*features.shape),
-                label_shape=DatasetShape(*labels.shape),
-                merged_shape=DatasetShape(*merged.shape),
-                n_bins=self.n_bins,
-                prior_strength=self.prior_strength,
-                features=numeric_features,
-                targets=valid_targets,
-                model_rows=len(model_frame),
-            )
+        metadata = ProbabilityBayesRunMetadata(
+            module=self.name,
+            created_at=datetime.now(UTC).isoformat(),
+            execution_time=_format_duration(time.perf_counter() - start_time),
+            feature_csv=str(feature_csv),
+            label_csv=str(label_csv),
+            join_strategy=join_strategy,
+            feature_shape=DatasetShape(*features.shape),
+            label_shape=DatasetShape(*labels.shape),
+            merged_shape=DatasetShape(*merged.shape),
+            n_bins=self.n_bins,
+            prior_strength=self.prior_strength,
+            features=numeric_features,
+            targets=valid_targets,
+            model_rows=len(model_frame),
+        )
 
-            scores_csv_path = _write_csv(run_dir / "bayes_probability_scores.csv", scores_df)
-            quantiles_csv_path = _write_csv(
-                run_dir / "quantile_bayes_probabilities.csv", quantiles_df
-            )
+        scores_csv_path = _write_csv(run_dir / "bayes_probability_scores.csv", scores_df)
+        quantiles_csv_path = _write_csv(
+            run_dir / "quantile_bayes_probabilities.csv", quantiles_df
+        )
 
-            summary_payload: dict[str, object] = {
-                **asdict(metadata),
-                "top_features": scores_df.head(10).to_dict(orient="records")
+        summary_payload: dict[str, object] = {
+            **asdict(metadata),
+            "top_features": scores_df.head(10).to_dict(orient="records")
+            if not scores_df.empty
+            else [],
+            "summary_metrics": {
+                "features_evaluated": len(numeric_features),
+                "targets_evaluated": len(valid_targets),
+                "max_bayes_information_value": _round(
+                    float(scores_df["bayes_information_value"].max())
+                )
                 if not scores_df.empty
-                else [],
-                "summary_metrics": {
-                    "features_evaluated": len(numeric_features),
-                    "targets_evaluated": len(valid_targets),
-                    "max_bayes_information_value": _round(
-                        float(scores_df["bayes_information_value"].max())
-                    )
-                    if not scores_df.empty
-                    else 0.0,
-                    "max_bayes_prob_spread": _round(
-                        float(scores_df["bayes_prob_spread"].max())
-                    )
-                    if not scores_df.empty
-                    else 0.0,
-                    "mean_ci_width": _round(float(scores_df["mean_ci_width"].mean()))
-                    if not scores_df.empty
-                    else 0.0,
-                },
-            }
-            summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
+                else 0.0,
+                "max_bayes_prob_spread": _round(
+                    float(scores_df["bayes_prob_spread"].max())
+                )
+                if not scores_df.empty
+                else 0.0,
+                "mean_ci_width": _round(float(scores_df["mean_ci_width"].mean()))
+                if not scores_df.empty
+                else 0.0,
+            },
+        }
+        summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
 
-            markdown_report = _render_markdown(metadata, scores_df, quantiles_df)
-            report_md_path = run_dir / "report.md"
-            report_md_path.write_text(markdown_report, encoding="utf-8")
+        markdown_report = _render_markdown(metadata, scores_df, quantiles_df)
+        report_md_path = run_dir / "report.md"
+        report_md_path.write_text(markdown_report, encoding="utf-8")
 
-            html_report = _render_html(metadata, markdown_report, scores_df, quantiles_df)
-            report_html_path = run_dir / "report.html"
-            report_html_path.write_text(html_report, encoding="utf-8")
+        html_report = _render_html(metadata, markdown_report, scores_df, quantiles_df)
+        report_html_path = run_dir / "report.html"
+        report_html_path.write_text(html_report, encoding="utf-8")
 
-            artifacts = [
-                summary_json_path,
-                scores_csv_path,
-                quantiles_csv_path,
-                plot_path,
-                report_md_path,
-                report_html_path,
-            ]
-            progress_bar.step("reports")
+        artifacts = [
+            summary_json_path,
+            scores_csv_path,
+            quantiles_csv_path,
+            plot_path,
+            report_md_path,
+            report_html_path,
+        ]
 
-            return ModuleResult(report_dir=run_dir, artifacts=artifacts)
+        return ModuleResult(report_dir=run_dir, artifacts=artifacts)

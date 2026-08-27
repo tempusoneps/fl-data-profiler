@@ -16,7 +16,7 @@ import pandas as pd
 
 from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
-from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.progress import ModuleProgress, StatusTimer
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -89,6 +89,7 @@ def _compute_1d_iv_and_spread(
     x: pd.Series,
     y: pd.Series,
     n_bins: int = DEFAULT_N_BINS,
+    precomputed_bins: pd.Series | None = None,
 ) -> dict[object, dict[str, float]]:
     """Compute 1D Information Value and Probability Spread for each class of target y."""
     clean_x = _numeric_series(x)
@@ -99,50 +100,39 @@ def _compute_1d_iv_and_spread(
     if len(x_val) < 2 or y_val.nunique(dropna=True) < 2 or x_val.nunique(dropna=True) < 2:
         return {}
 
-    bins = _compute_quantile_bins(x_val, n_bins=n_bins)
-    df = pd.DataFrame({"x": x_val, "y": y_val, "bin": bins})
-    n_total = len(df)
-    unique_classes = sorted(df["y"].unique(), key=lambda v: str(v))
-    bin_indices = sorted(df["bin"].unique())
+    if precomputed_bins is not None:
+        bins = precomputed_bins[valid_mask]
+    else:
+        bins = _compute_quantile_bins(x_val, n_bins=n_bins)
 
-    # Pre-aggregate counts per bin
-    bin_counts: dict[int, int] = {}
-    bin_class_counts: dict[int, dict[object, int]] = {}
-    for k in bin_indices:
-        bin_df = df[df["bin"] == k]
-        n_k = len(bin_df)
-        bin_counts[k] = n_k
-        bin_class_counts[k] = {c: int((bin_df["y"] == c).sum()) for c in unique_classes}
+    ct = pd.crosstab(bins, y_val)
+    if ct.empty:
+        return {}
+
+    n_total = len(x_val)
+    bin_totals = ct.sum(axis=1).values.astype(float)
+    unique_classes = sorted(ct.columns, key=lambda v: str(v))
 
     result: dict[object, dict[str, float]] = {}
     for c in unique_classes:
-        total_events = int((df["y"] == c).sum())
-        total_non_events = n_total - total_events
+        events_k = ct[c].values.astype(float)
+        non_events_k = bin_totals - events_k
+        total_events = float(events_k.sum())
+        total_non_events = float(n_total - total_events)
 
-        probs: list[float] = []
-        iv_total = 0.0
+        if total_events <= 0 or total_non_events <= 0:
+            continue
 
-        for k in bin_indices:
-            n_k = bin_counts.get(k, 0)
-            if n_k == 0:
-                continue
-            events_k = bin_class_counts[k].get(c, 0)
-            non_events_k = n_k - events_k
-            prob_k = events_k / n_k if n_k > 0 else 0.0
-            probs.append(prob_k)
+        probs = events_k / np.maximum(bin_totals, 1.0)
+        dist_event = events_k / total_events
+        dist_non_event = non_events_k / total_non_events
 
-            dist_event = events_k / total_events if total_events > 0 else 0.0
-            dist_non_event = non_events_k / total_non_events if total_non_events > 0 else 0.0
+        p_e = np.maximum(dist_event, EPSILON)
+        p_ne = np.maximum(dist_non_event, EPSILON)
+        woe_k = np.log(p_e / p_ne)
+        iv_total = float(np.sum((dist_event - dist_non_event) * woe_k))
 
-            p_e = max(dist_event, EPSILON)
-            p_ne = max(dist_non_event, EPSILON)
-            woe_k = float(np.log(p_e / p_ne))
-            iv_k = float((dist_event - dist_non_event) * woe_k)
-            iv_total += iv_k
-
-        prob_arr = np.array(probs, dtype=float)
-        spread = float(prob_arr.max() - prob_arr.min()) if len(prob_arr) > 0 else 0.0
-
+        spread = float(probs.max() - probs.min()) if len(probs) > 0 else 0.0
         result[c] = {
             "iv": iv_total,
             "prob_spread": spread,
@@ -157,21 +147,48 @@ def _prescreen_candidate_features(
     valid_targets: list[str],
     max_candidates: int,
     n_bins: int,
+    progress: bool = False,
+    module_name: str = "probability_2d",
 ) -> tuple[list[str], dict[str, dict[str, dict[object, dict[str, float]]]]]:
     """Screen top features by 1D Information Value (IV) across targets."""
     feature_1d_stats: dict[str, dict[str, dict[object, dict[str, float]]]] = {}
     feature_max_iv: dict[str, float] = {}
 
-    for f in numeric_features:
-        feature_1d_stats[f] = {}
-        max_iv_f = 0.0
-        for t in valid_targets:
-            stats_dict = _compute_1d_iv_and_spread(model_frame[f], model_frame[t], n_bins=n_bins)
-            feature_1d_stats[f][t] = stats_dict
-            for m in stats_dict.values():
-                if m["iv"] > max_iv_f:
-                    max_iv_f = m["iv"]
-        feature_max_iv[f] = max_iv_f
+    show_progress = progress and len(numeric_features) > 20
+    ps_bar = (
+        ModuleProgress(
+            f"{module_name} (prescreen)",
+            total=len(numeric_features),
+            unit="feat",
+            enabled=True,
+        )
+        if show_progress
+        else None
+    )
+    if ps_bar:
+        ps_bar.__enter__()
+
+    try:
+        for f in numeric_features:
+            feature_1d_stats[f] = {}
+            max_iv_f = 0.0
+            clean_x = _numeric_series(model_frame[f])
+            bins = _compute_quantile_bins(clean_x, n_bins=n_bins)
+
+            for t in valid_targets:
+                stats_dict = _compute_1d_iv_and_spread(
+                    clean_x, model_frame[t], n_bins=n_bins, precomputed_bins=bins
+                )
+                feature_1d_stats[f][t] = stats_dict
+                for m in stats_dict.values():
+                    if m["iv"] > max_iv_f:
+                        max_iv_f = m["iv"]
+            feature_max_iv[f] = max_iv_f
+            if ps_bar:
+                ps_bar.step(f)
+    finally:
+        if ps_bar:
+            ps_bar.__exit__(None, None, None)
 
     # Sort descending by max 1D IV
     sorted_features = sorted(numeric_features, key=lambda f: feature_max_iv.get(f, 0.0), reverse=True)
@@ -921,7 +938,7 @@ class Probability2DModule:
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+        with StatusTimer(f"{self.name}: Loading & pre-screening", enabled=self.progress):
             features = _read_table_with_date_index(feature_csv)
             labels = _read_table_with_date_index(label_csv)
             merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -949,7 +966,6 @@ class Probability2DModule:
                 MAX_ROWS,
                 RANDOM_STATE,
             ) if valid_targets and numeric_features else merged
-            progress_bar.step("load")
 
             # 1D Pre-screening to select top max_candidates features by 1D IV
             candidate_features, feature_1d_stats = _prescreen_candidate_features(
@@ -962,9 +978,14 @@ class Probability2DModule:
 
             # Evaluate all pairs of candidate features
             feature_pairs = list(itertools.combinations(candidate_features, 2))
-            all_pair_scores: list[dict[str, object]] = []
-            all_cell_rows: list[dict[str, object]] = []
+            total_evals = len(feature_pairs) * len(valid_targets)
 
+        all_pair_scores: list[dict[str, object]] = []
+        all_cell_rows: list[dict[str, object]] = []
+
+        with ModuleProgress(
+            self.name, total=max(1, total_evals), unit="pair", enabled=self.progress
+        ) as progress_bar:
             for f1, f2 in feature_pairs:
                 for target_col in valid_targets:
                     f1_stats = feature_1d_stats.get(f1, {}).get(target_col, {})
@@ -984,98 +1005,98 @@ class Probability2DModule:
                     )
                     all_pair_scores.extend(pair_scores)
                     all_cell_rows.extend(cell_rows)
+                    progress_bar.step(f"{f1}->{target_col}")
 
-            pair_scores_df = pd.DataFrame(all_pair_scores)
-            cell_df = pd.DataFrame(all_cell_rows)
+            if total_evals == 0:
+                progress_bar.step("no_valid_pairs")
 
-            if not pair_scores_df.empty:
-                pair_scores_df = pair_scores_df.sort_values(
-                    ["synergy_gain", "iv_2d"],
-                    ascending=[False, False],
-                ).reset_index(drop=True)
+        pair_scores_df = pd.DataFrame(all_pair_scores)
+        cell_df = pd.DataFrame(all_cell_rows)
 
-            progress_bar.step("probabilities_2d")
+        if not pair_scores_df.empty:
+            pair_scores_df = pair_scores_df.sort_values(
+                ["synergy_gain", "iv_2d"],
+                ascending=[False, False],
+            ).reset_index(drop=True)
 
-            plot_path = run_dir / "probability_2d_heatmaps.png"
-            _plot_probability_2d_heatmaps(
-                pair_scores_df,
-                cell_df,
-                plot_path,
-                n_bins=self.n_bins,
-                top_n=6,
-            )
-            progress_bar.step("heatmaps")
+        plot_path = run_dir / "probability_2d_heatmaps.png"
+        _plot_probability_2d_heatmaps(
+            pair_scores_df,
+            cell_df,
+            plot_path,
+            n_bins=self.n_bins,
+            top_n=6,
+        )
 
-            metadata = Probability2DRunMetadata(
-                module=self.name,
-                created_at=datetime.now(UTC).isoformat(),
-                execution_time=_format_duration(time.perf_counter() - start_time),
-                feature_csv=str(feature_csv),
-                label_csv=str(label_csv),
-                join_strategy=join_strategy,
-                feature_shape=DatasetShape(*features.shape),
-                label_shape=DatasetShape(*labels.shape),
-                merged_shape=DatasetShape(*merged.shape),
-                n_bins=self.n_bins,
-                max_candidates=self.max_candidates,
-                min_support=self.min_support,
-                features_count=len(numeric_features),
-                candidate_features=candidate_features,
-                pairs_evaluated=len(feature_pairs),
-                targets=valid_targets,
-                model_rows=len(model_frame),
-            )
+        metadata = Probability2DRunMetadata(
+            module=self.name,
+            created_at=datetime.now(UTC).isoformat(),
+            execution_time=_format_duration(time.perf_counter() - start_time),
+            feature_csv=str(feature_csv),
+            label_csv=str(label_csv),
+            join_strategy=join_strategy,
+            feature_shape=DatasetShape(*features.shape),
+            label_shape=DatasetShape(*labels.shape),
+            merged_shape=DatasetShape(*merged.shape),
+            n_bins=self.n_bins,
+            max_candidates=self.max_candidates,
+            min_support=self.min_support,
+            features_count=len(numeric_features),
+            candidate_features=candidate_features,
+            pairs_evaluated=len(feature_pairs),
+            targets=valid_targets,
+            model_rows=len(model_frame),
+        )
 
-            pair_scores_csv_path = _write_csv(run_dir / "pair_probability_scores.csv", pair_scores_df)
-            cell_csv_path = _write_csv(run_dir / "cell_conditional_probabilities.csv", cell_df)
+        pair_scores_csv_path = _write_csv(run_dir / "pair_probability_scores.csv", pair_scores_df)
+        cell_csv_path = _write_csv(run_dir / "cell_conditional_probabilities.csv", cell_df)
 
-            summary_payload: dict[str, object] = {
-                **asdict(metadata),
-                "top_pairs": pair_scores_df.head(10).to_dict(orient="records")
+        summary_payload: dict[str, object] = {
+            **asdict(metadata),
+            "top_pairs": pair_scores_df.head(10).to_dict(orient="records")
+            if not pair_scores_df.empty
+            else [],
+            "top_sweet_spots": pair_scores_df.sort_values("sweet_spot_prob", ascending=False)
+            .head(10)
+            .to_dict(orient="records")
+            if not pair_scores_df.empty
+            else [],
+            "summary_metrics": {
+                "features_evaluated": len(numeric_features),
+                "candidate_features": len(candidate_features),
+                "pairs_evaluated": len(feature_pairs),
+                "targets_evaluated": len(valid_targets),
+                "max_synergy_gain": _round(float(pair_scores_df["synergy_gain"].max()))
                 if not pair_scores_df.empty
-                else [],
-                "top_sweet_spots": pair_scores_df.sort_values("sweet_spot_prob", ascending=False)
-                .head(10)
-                .to_dict(orient="records")
+                else 0.0,
+                "max_iv_2d": _round(float(pair_scores_df["iv_2d"].max()))
                 if not pair_scores_df.empty
-                else [],
-                "summary_metrics": {
-                    "features_evaluated": len(numeric_features),
-                    "candidate_features": len(candidate_features),
-                    "pairs_evaluated": len(feature_pairs),
-                    "targets_evaluated": len(valid_targets),
-                    "max_synergy_gain": _round(float(pair_scores_df["synergy_gain"].max()))
-                    if not pair_scores_df.empty
-                    else 0.0,
-                    "max_iv_2d": _round(float(pair_scores_df["iv_2d"].max()))
-                    if not pair_scores_df.empty
-                    else 0.0,
-                    "max_sweet_spot_prob": _round(float(pair_scores_df["sweet_spot_prob"].max()))
-                    if not pair_scores_df.empty
-                    else 0.0,
-                    "max_lift": _round(float(pair_scores_df["sweet_spot_lift"].max()))
-                    if not pair_scores_df.empty
-                    else 0.0,
-                },
-            }
-            summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
+                else 0.0,
+                "max_sweet_spot_prob": _round(float(pair_scores_df["sweet_spot_prob"].max()))
+                if not pair_scores_df.empty
+                else 0.0,
+                "max_lift": _round(float(pair_scores_df["sweet_spot_lift"].max()))
+                if not pair_scores_df.empty
+                else 0.0,
+            },
+        }
+        summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
 
-            markdown_report = _render_markdown(metadata, pair_scores_df, cell_df)
-            report_md_path = run_dir / "report.md"
-            report_md_path.write_text(markdown_report, encoding="utf-8")
+        markdown_report = _render_markdown(metadata, pair_scores_df, cell_df)
+        report_md_path = run_dir / "report.md"
+        report_md_path.write_text(markdown_report, encoding="utf-8")
 
-            html_report = _render_html(metadata, markdown_report, pair_scores_df, cell_df)
-            report_html_path = run_dir / "report.html"
-            report_html_path.write_text(html_report, encoding="utf-8")
+        html_report = _render_html(metadata, markdown_report, pair_scores_df, cell_df)
+        report_html_path = run_dir / "report.html"
+        report_html_path.write_text(html_report, encoding="utf-8")
 
-            artifacts = [
-                summary_json_path,
-                pair_scores_csv_path,
-                cell_csv_path,
-                plot_path,
-                report_md_path,
-                report_html_path,
-            ]
-            progress_bar.step("reports")
+        artifacts = [
+            summary_json_path,
+            pair_scores_csv_path,
+            cell_csv_path,
+            plot_path,
+            report_md_path,
+            report_html_path,
+        ]
 
-            return ModuleResult(report_dir=run_dir, artifacts=artifacts)
+        return ModuleResult(report_dir=run_dir, artifacts=artifacts)

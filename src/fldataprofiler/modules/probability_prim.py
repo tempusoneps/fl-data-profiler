@@ -19,7 +19,7 @@ from scipy import stats
 
 from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
-from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.progress import ModuleProgress, StatusTimer
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -95,8 +95,13 @@ def _compute_quantile_bins(series: pd.Series, n_bins: int = 10) -> pd.Series:
     return bins.astype(int)
 
 
-def _compute_1d_iv(x: pd.Series, y_binary: pd.Series, n_bins: int = 10) -> float:
-    """Compute 1D Information Value for feature x with binary target y_binary."""
+def _compute_1d_iv(
+    x: pd.Series,
+    y_binary: pd.Series,
+    n_bins: int = 10,
+    precomputed_bins: pd.Series | None = None,
+) -> float:
+    """Calculate 1D Information Value for feature x against binary target y."""
     clean_x = _numeric_series(x)
     valid_mask = clean_x.notna() & y_binary.notna()
     x_val = clean_x[valid_mask]
@@ -105,33 +110,30 @@ def _compute_1d_iv(x: pd.Series, y_binary: pd.Series, n_bins: int = 10) -> float
     if len(x_val) < 2 or y_val.nunique(dropna=True) < 2 or x_val.nunique(dropna=True) < 2:
         return 0.0
 
-    bins = _compute_quantile_bins(x_val, n_bins=n_bins)
-    df = pd.DataFrame({"x": x_val, "y": y_val, "bin": bins})
-    total_events = int((df["y"] == 1).sum())
-    total_non_events = int((df["y"] == 0).sum())
+    if precomputed_bins is not None:
+        bins = precomputed_bins[valid_mask]
+    else:
+        bins = _compute_quantile_bins(x_val, n_bins=n_bins)
 
-    if total_events == 0 or total_non_events == 0:
+    ct = pd.crosstab(bins, y_val)
+    if ct.empty or 1 not in ct.columns or 0 not in ct.columns:
         return 0.0
 
-    iv_total = 0.0
-    for k in sorted(df["bin"].unique()):
-        bin_df = df[df["bin"] == k]
-        n_k = len(bin_df)
-        if n_k == 0:
-            continue
-        events_k = int((bin_df["y"] == 1).sum())
-        non_events_k = n_k - events_k
+    events = ct[1].values.astype(float)
+    non_events = ct[0].values.astype(float)
+    total_events = float(events.sum())
+    total_non_events = float(non_events.sum())
 
-        dist_event = events_k / total_events
-        dist_non_event = non_events_k / total_non_events
+    if total_events <= 0 or total_non_events <= 0:
+        return 0.0
 
-        p_e = max(dist_event, EPSILON)
-        p_ne = max(dist_non_event, EPSILON)
-        woe_k = float(np.log(p_e / p_ne))
-        iv_k = float((dist_event - dist_non_event) * woe_k)
-        iv_total += iv_k
+    dist_event = events / total_events
+    dist_non_event = non_events / total_non_events
 
-    return iv_total
+    p_e = np.maximum(dist_event, EPSILON)
+    p_ne = np.maximum(dist_non_event, EPSILON)
+    woe_k = np.log(p_e / p_ne)
+    return float(np.sum((dist_event - dist_non_event) * woe_k))
 
 
 def _prescreen_candidate_features(
@@ -139,21 +141,46 @@ def _prescreen_candidate_features(
     numeric_features: list[str],
     valid_targets: list[str],
     max_candidates: int = DEFAULT_MAX_CANDIDATES,
+    progress: bool = False,
+    module_name: str = "probability_prim",
 ) -> list[str]:
     """Screen top candidate features based on max Information Value across targets."""
     feature_max_iv: dict[str, float] = {}
 
-    for f in numeric_features:
-        max_iv_f = 0.0
-        for t in valid_targets:
-            target_series = model_frame[t].dropna()
-            unique_classes = target_series.unique()
-            for c in unique_classes:
-                y_binary = (model_frame[t] == c).astype(int)
-                iv = _compute_1d_iv(model_frame[f], y_binary, n_bins=10)
-                if iv > max_iv_f:
-                    max_iv_f = iv
-        feature_max_iv[f] = max_iv_f
+    show_progress = progress and len(numeric_features) > 20
+    ps_bar = (
+        ModuleProgress(
+            f"{module_name} (prescreen)",
+            total=len(numeric_features),
+            unit="feat",
+            enabled=True,
+        )
+        if show_progress
+        else None
+    )
+    if ps_bar:
+        ps_bar.__enter__()
+
+    try:
+        for f in numeric_features:
+            max_iv_f = 0.0
+            clean_x = _numeric_series(model_frame[f])
+            bins = _compute_quantile_bins(clean_x, n_bins=10)
+
+            for t in valid_targets:
+                target_series = model_frame[t].dropna()
+                unique_classes = target_series.unique()
+                for c in unique_classes:
+                    y_binary = (model_frame[t] == c).astype(int)
+                    iv = _compute_1d_iv(clean_x, y_binary, n_bins=10, precomputed_bins=bins)
+                    if iv > max_iv_f:
+                        max_iv_f = iv
+            feature_max_iv[f] = max_iv_f
+            if ps_bar:
+                ps_bar.step(f)
+    finally:
+        if ps_bar:
+            ps_bar.__exit__(None, None, None)
 
     sorted_features = sorted(
         numeric_features, key=lambda f: feature_max_iv.get(f, 0.0), reverse=True
@@ -1147,7 +1174,7 @@ class ProbabilityPrimModule:
         run_dir = Path(output_dir) / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+        with StatusTimer(f"{self.name}: Loading & pre-screening", enabled=self.progress):
             features = _read_table_with_date_index(feature_path)
             labels = _read_table_with_date_index(label_path)
             merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -1163,7 +1190,7 @@ class ProbabilityPrimModule:
                 merged, feature_columns, min_non_null=MIN_NON_NULL
             )
 
-            # Filter for discrete / categorical targets
+            # Filter valid discrete targets
             valid_targets: list[str] = []
             for target_col in selected_targets:
                 clean_target = merged[target_col].dropna()
@@ -1179,7 +1206,6 @@ class ProbabilityPrimModule:
                 if valid_targets and numeric_features
                 else merged
             )
-            progress_bar.step("load")
 
             # Candidate Feature Screening
             candidate_features = _prescreen_candidate_features(
@@ -1189,16 +1215,20 @@ class ProbabilityPrimModule:
                 max_candidates=self.max_candidates,
             )
 
-            all_rules: list[dict[str, Any]] = []
+        all_rules: list[dict[str, Any]] = []
 
-            # Adjust min_box_samples adaptively based on dataset size and configured min_support
-            eff_min_samples = max(
-                10,
-                max(self.min_box_samples, int(self.min_support * len(model_frame))),
-            )
-            # Ensure feasibility on small synthetic test datasets
-            eff_min_samples = min(eff_min_samples, max(10, int(len(model_frame) * 0.15)))
+        # Adjust min_box_samples adaptively based on dataset size and configured min_support
+        eff_min_samples = max(
+            10,
+            max(self.min_box_samples, int(self.min_support * len(model_frame))),
+        )
+        # Ensure feasibility on small synthetic test datasets
+        eff_min_samples = min(eff_min_samples, max(10, int(len(model_frame) * 0.15)))
 
+        total_evals = len(valid_targets)
+        with ModuleProgress(
+            self.name, total=max(1, total_evals), unit="target", enabled=self.progress
+        ) as progress_bar:
             for target_col in valid_targets:
                 rules_t = _extract_prim_rules_for_target(
                     df=model_frame,
@@ -1211,116 +1241,117 @@ class ProbabilityPrimModule:
                     objective=self.objective,
                 )
                 all_rules.extend(rules_t)
+                progress_bar.step(f"PRIM->{target_col}")
 
-            # Rank and assign rule_id
-            all_rules.sort(
-                key=lambda r: (
-                    r["lift"] or 0.0,
-                    r["win_rate"] or 0.0,
-                    r["support"] or 0.0,
-                ),
-                reverse=True,
-            )
-            for idx, r in enumerate(all_rules, 1):
-                r["rule_id"] = f"rule_{idx}"
+            if total_evals == 0:
+                progress_bar.step("no_valid_targets")
 
-            rules_df = pd.DataFrame(all_rules)
-            progress_bar.step("prim_bump_hunting")
+        # Rank and assign rule_id
+        all_rules.sort(
+            key=lambda r: (
+                r["lift"] or 0.0,
+                r["win_rate"] or 0.0,
+                r["support"] or 0.0,
+            ),
+            reverse=True,
+        )
+        for idx, r in enumerate(all_rules, 1):
+            r["rule_id"] = f"rule_{idx}"
 
-            # Generate Artifacts
-            plot_path = run_dir / "prim_rules_plot.png"
-            _plot_prim_rules(model_frame, rules_df, plot_path)
+        rules_df = pd.DataFrame(all_rules)
 
-            python_code_str = _generate_python_rule_code(all_rules)
-            python_code_path = run_dir / "rule_code_python.py"
-            python_code_path.write_text(python_code_str, encoding="utf-8")
+        # Generate Artifacts
+        plot_path = run_dir / "prim_rules_plot.png"
+        _plot_prim_rules(model_frame, rules_df, plot_path)
 
-            rules_csv_path = _write_csv(
-                run_dir / "prim_rules.csv",
-                rules_df.drop(columns=["indices", "bounds", "python_condition"], errors="ignore"),
-            )
+        python_code_str = _generate_python_rule_code(all_rules)
+        python_code_path = run_dir / "rule_code_python.py"
+        python_code_path.write_text(python_code_str, encoding="utf-8")
 
-            metadata = ProbabilityPrimRunMetadata(
-                module=self.name,
-                created_at=datetime.now(UTC).isoformat(),
-                execution_time=_format_duration(time.perf_counter() - start_time),
-                feature_csv=str(feature_csv),
-                label_csv=str(label_csv),
-                join_strategy=join_strategy,
-                feature_shape=DatasetShape(*features.shape),
-                label_shape=DatasetShape(*labels.shape),
-                merged_shape=DatasetShape(*merged.shape),
-                alpha=self.alpha,
-                min_box_samples=eff_min_samples,
-                min_support=self.min_support,
-                objective=self.objective,
-                max_candidates=self.max_candidates,
-                features_count=len(numeric_features),
-                candidate_features=candidate_features,
-                targets=valid_targets,
-                model_rows=len(model_frame),
-                rules_count=len(all_rules),
-            )
+        rules_csv_path = _write_csv(
+            run_dir / "prim_rules.csv",
+            rules_df.drop(columns=["indices", "bounds", "python_condition"], errors="ignore"),
+        )
 
-            def _clean_rule_for_json(r: dict[str, Any]) -> dict[str, Any]:
-                return {
-                    "rule_id": str(r.get("rule_id", "")),
-                    "dimension": str(r.get("dimension", "")),
-                    "features": str(r.get("features", "")),
-                    "target": str(r.get("target", "")),
-                    "target_class": r.get("target_class"),
-                    "bounds_condition": str(r.get("bounds_condition", "")),
-                    "sample_count": int(r.get("sample_count", 0)),
-                    "support": float(r.get("support", 0.0)),
-                    "target_positive_count": int(r.get("target_positive_count", 0)),
-                    "win_rate": float(r.get("win_rate", 0.0)),
-                    "baseline_rate": float(r.get("baseline_rate", 0.0)),
-                    "lift": float(r.get("lift", 1.0)),
-                    "p_value_fisher": float(r.get("p_value_fisher", 1.0)),
-                    "credible_interval_low_95": float(r.get("credible_interval_low_95", 0.0)),
-                    "credible_interval_high_95": float(r.get("credible_interval_high_95", 1.0)),
-                }
+        metadata = ProbabilityPrimRunMetadata(
+            module=self.name,
+            created_at=datetime.now(UTC).isoformat(),
+            execution_time=_format_duration(time.perf_counter() - start_time),
+            feature_csv=str(feature_csv),
+            label_csv=str(label_csv),
+            join_strategy=join_strategy,
+            feature_shape=DatasetShape(*features.shape),
+            label_shape=DatasetShape(*labels.shape),
+            merged_shape=DatasetShape(*merged.shape),
+            alpha=self.alpha,
+            min_box_samples=eff_min_samples,
+            min_support=self.min_support,
+            objective=self.objective,
+            max_candidates=self.max_candidates,
+            features_count=len(numeric_features),
+            candidate_features=candidate_features,
+            targets=valid_targets,
+            model_rows=len(model_frame),
+            rules_count=len(all_rules),
+        )
 
-            summary_payload: dict[str, Any] = {
-                **asdict(metadata),
-                "top_rules": [_clean_rule_for_json(r) for r in all_rules[:10]]
-                if all_rules
-                else [],
-                "summary_metrics": {
-                    "rules_discovered": len(all_rules),
-                    "max_win_rate": _round(float(rules_df["win_rate"].max()))
-                    if not rules_df.empty
-                    else 0.0,
-                    "max_lift": _round(float(rules_df["lift"].max()))
-                    if not rules_df.empty
-                    else 1.0,
-                    "best_rule_support": _round(float(rules_df["support"].iloc[0]))
-                    if not rules_df.empty
-                    else 0.0,
-                    "best_rule_p_value": _round(float(rules_df["p_value_fisher"].iloc[0]))
-                    if not rules_df.empty
-                    else 1.0,
-                },
+        def _clean_rule_for_json(r: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "rule_id": str(r.get("rule_id", "")),
+                "dimension": str(r.get("dimension", "")),
+                "features": str(r.get("features", "")),
+                "target": str(r.get("target", "")),
+                "target_class": r.get("target_class"),
+                "bounds_condition": str(r.get("bounds_condition", "")),
+                "sample_count": int(r.get("sample_count", 0)),
+                "support": float(r.get("support", 0.0)),
+                "target_positive_count": int(r.get("target_positive_count", 0)),
+                "win_rate": float(r.get("win_rate", 0.0)),
+                "baseline_rate": float(r.get("baseline_rate", 0.0)),
+                "lift": float(r.get("lift", 1.0)),
+                "p_value_fisher": float(r.get("p_value_fisher", 1.0)),
+                "credible_interval_low_95": float(r.get("credible_interval_low_95", 0.0)),
+                "credible_interval_high_95": float(r.get("credible_interval_high_95", 1.0)),
             }
-            summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
 
-            markdown_report = _render_markdown(metadata, rules_df)
-            report_md_path = run_dir / "report.md"
-            report_md_path.write_text(markdown_report, encoding="utf-8")
+        summary_payload: dict[str, Any] = {
+            **asdict(metadata),
+            "top_rules": [_clean_rule_for_json(r) for r in all_rules[:10]]
+            if all_rules
+            else [],
+            "summary_metrics": {
+                "rules_discovered": len(all_rules),
+                "max_win_rate": _round(float(rules_df["win_rate"].max()))
+                if not rules_df.empty
+                else 0.0,
+                "max_lift": _round(float(rules_df["lift"].max()))
+                if not rules_df.empty
+                else 1.0,
+                "best_rule_support": _round(float(rules_df["support"].iloc[0]))
+                if not rules_df.empty
+                else 0.0,
+                "best_rule_p_value": _round(float(rules_df["p_value_fisher"].iloc[0]))
+                if not rules_df.empty
+                else 1.0,
+            },
+        }
+        summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
 
-            html_report = _render_html(metadata, markdown_report, rules_df)
-            report_html_path = run_dir / "report.html"
-            report_html_path.write_text(html_report, encoding="utf-8")
+        markdown_report = _render_markdown(metadata, rules_df)
+        report_md_path = run_dir / "report.md"
+        report_md_path.write_text(markdown_report, encoding="utf-8")
 
-            progress_bar.step("reports")
+        html_report = _render_html(metadata, markdown_report, rules_df)
+        report_html_path = run_dir / "report.html"
+        report_html_path.write_text(html_report, encoding="utf-8")
 
-            artifacts = [
-                summary_json_path,
-                rules_csv_path,
-                python_code_path,
-                plot_path,
-                report_md_path,
-                report_html_path,
-            ]
+        artifacts = [
+            summary_json_path,
+            rules_csv_path,
+            python_code_path,
+            plot_path,
+            report_md_path,
+            report_html_path,
+        ]
 
-            return ModuleResult(report_dir=run_dir, artifacts=artifacts)
+        return ModuleResult(report_dir=run_dir, artifacts=artifacts)

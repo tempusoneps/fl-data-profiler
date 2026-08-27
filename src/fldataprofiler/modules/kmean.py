@@ -320,7 +320,7 @@ def _fit_kmeans_reports(
                 distribution_rows.extend(distribution)
 
             if progress_bar is not None:
-                progress_bar.step(f"{feature_1}+{feature_2}->{label}")
+                progress_bar.step(f"{feature_1}->{label}")
 
     return _results_frame(result_rows), _cluster_distribution_frame(distribution_rows)
 

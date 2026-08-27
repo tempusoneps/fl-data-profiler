@@ -14,7 +14,7 @@ import pandas as pd
 from scipy import stats
 
 from fldataprofiler.modules.base import ModuleResult
-from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.progress import ModuleProgress, StatusTimer
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -730,7 +730,7 @@ class ProbabilityDriftModule:
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+        with StatusTimer(f"{self.name}: Loading & preparing", enabled=self.progress):
             features = _read_table_with_date_index(feature_csv)
             labels = _read_table_with_date_index(label_csv)
             merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -757,12 +757,16 @@ class ProbabilityDriftModule:
                 MAX_ROWS,
                 RANDOM_STATE,
             ) if valid_targets and numeric_features else merged
-            progress_bar.step("load")
 
-            all_summary_scores: list[dict[str, object]] = []
-            all_fold_metrics: list[dict[str, object]] = []
-            all_quantile_details: list[dict[str, object]] = []
+            total_evals = len(numeric_features) * len(valid_targets)
 
+        all_summary_scores: list[dict[str, object]] = []
+        all_fold_metrics: list[dict[str, object]] = []
+        all_quantile_details: list[dict[str, object]] = []
+
+        with ModuleProgress(
+            self.name, total=max(1, total_evals), unit="feat", enabled=self.progress
+        ) as progress_bar:
             for feature_col in numeric_features:
                 for target_col in valid_targets:
                     scores, fold_m, q_details = _evaluate_feature_drift(
@@ -776,79 +780,79 @@ class ProbabilityDriftModule:
                     all_summary_scores.extend(scores)
                     all_fold_metrics.extend(fold_m)
                     all_quantile_details.extend(q_details)
+                    progress_bar.step(f"{feature_col}->{target_col}")
 
-            summary_df = pd.DataFrame(all_summary_scores)
-            fold_metrics_df = pd.DataFrame(all_fold_metrics)
-            quantile_df = pd.DataFrame(all_quantile_details)
+            if total_evals == 0:
+                progress_bar.step("no_valid_targets")
 
-            if not summary_df.empty:
-                summary_df = summary_df.sort_values(
-                    ["stability_ratio", "mean_iv"],
-                    ascending=[False, False],
-                ).reset_index(drop=True)
+        summary_df = pd.DataFrame(all_summary_scores)
+        fold_metrics_df = pd.DataFrame(all_fold_metrics)
+        quantile_df = pd.DataFrame(all_quantile_details)
 
-            progress_bar.step("drift_evaluation")
+        if not summary_df.empty:
+            summary_df = summary_df.sort_values(
+                ["stability_ratio", "mean_iv"],
+                ascending=[False, False],
+            ).reset_index(drop=True)
 
-            plot_path = run_dir / "probability_drift_charts.png"
-            _plot_probability_drift_charts(summary_df, quantile_df, plot_path)
-            progress_bar.step("charts")
+        plot_path = run_dir / "probability_drift_charts.png"
+        _plot_probability_drift_charts(summary_df, quantile_df, plot_path)
 
-            metadata = ProbabilityDriftRunMetadata(
-                module=self.name,
-                created_at=datetime.now(UTC).isoformat(),
-                execution_time=_format_duration(time.perf_counter() - start_time),
-                feature_csv=str(feature_csv),
-                label_csv=str(label_csv),
-                join_strategy=join_strategy,
-                feature_shape=DatasetShape(*features.shape),
-                label_shape=DatasetShape(*labels.shape),
-                merged_shape=DatasetShape(*merged.shape),
-                n_bins=self.n_bins,
-                n_folds=self.n_folds,
-                features=numeric_features,
-                targets=valid_targets,
-                model_rows=len(model_frame),
-            )
+        metadata = ProbabilityDriftRunMetadata(
+            module=self.name,
+            created_at=datetime.now(UTC).isoformat(),
+            execution_time=_format_duration(time.perf_counter() - start_time),
+            feature_csv=str(feature_csv),
+            label_csv=str(label_csv),
+            join_strategy=join_strategy,
+            feature_shape=DatasetShape(*features.shape),
+            label_shape=DatasetShape(*labels.shape),
+            merged_shape=DatasetShape(*merged.shape),
+            n_bins=self.n_bins,
+            n_folds=self.n_folds,
+            features=numeric_features,
+            targets=valid_targets,
+            model_rows=len(model_frame),
+        )
 
-            scores_csv_path = _write_csv(run_dir / "feature_drift_scores.csv", summary_df)
-            fold_csv_path = _write_csv(run_dir / "fold_probability_metrics.csv", fold_metrics_df)
-            quantiles_csv_path = _write_csv(run_dir / "quantile_drift_probabilities.csv", quantile_df)
+        scores_csv_path = _write_csv(run_dir / "feature_drift_scores.csv", summary_df)
+        fold_csv_path = _write_csv(run_dir / "fold_probability_metrics.csv", fold_metrics_df)
+        quantiles_csv_path = _write_csv(run_dir / "quantile_drift_probabilities.csv", quantile_df)
 
-            summary_payload: dict[str, object] = {
-                **asdict(metadata),
-                "top_stable_features": summary_df[summary_df["drift_status"] == "STABLE"].head(10).to_dict(orient="records")
-                if not summary_df.empty
-                else [],
-                "top_drifting_features": summary_df[summary_df["drift_status"] == "HIGH_DRIFT"].head(10).to_dict(orient="records")
-                if not summary_df.empty
-                else [],
-                "summary_metrics": {
-                    "features_evaluated": len(numeric_features),
-                    "targets_evaluated": len(valid_targets),
-                    "stable_count": int((summary_df["drift_status"] == "STABLE").sum()) if not summary_df.empty else 0,
-                    "moderate_drift_count": int((summary_df["drift_status"] == "MODERATE_DRIFT").sum()) if not summary_df.empty else 0,
-                    "high_drift_count": int((summary_df["drift_status"] == "HIGH_DRIFT").sum()) if not summary_df.empty else 0,
-                },
-            }
-            summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
+        summary_payload: dict[str, object] = {
+            **asdict(metadata),
+            "top_stable_features": summary_df[summary_df["drift_status"] == "STABLE"].head(10).to_dict(orient="records")
+            if not summary_df.empty
+            else [],
+            "top_drifting_features": summary_df[summary_df["drift_status"] == "HIGH_DRIFT"].head(10).to_dict(orient="records")
+            if not summary_df.empty
+            else [],
+            "summary_metrics": {
+                "features_evaluated": len(numeric_features),
+                "targets_evaluated": len(valid_targets),
+                "stable_count": int((summary_df["drift_status"] == "STABLE").sum()) if not summary_df.empty else 0,
+                "moderate_drift_count": int((summary_df["drift_status"] == "MODERATE_DRIFT").sum()) if not summary_df.empty else 0,
+                "high_drift_count": int((summary_df["drift_status"] == "HIGH_DRIFT").sum()) if not summary_df.empty else 0,
+            },
+        }
+        summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
 
-            markdown_report = _render_markdown(metadata, summary_df, fold_metrics_df)
-            report_md_path = run_dir / "report.md"
-            report_md_path.write_text(markdown_report, encoding="utf-8")
+        markdown_report = _render_markdown(metadata, summary_df, fold_metrics_df)
+        report_md_path = run_dir / "report.md"
+        report_md_path.write_text(markdown_report, encoding="utf-8")
 
-            html_report = _render_html(metadata, markdown_report, summary_df, fold_metrics_df)
-            report_html_path = run_dir / "report.html"
-            report_html_path.write_text(html_report, encoding="utf-8")
+        html_report = _render_html(metadata, markdown_report, summary_df, fold_metrics_df)
+        report_html_path = run_dir / "report.html"
+        report_html_path.write_text(html_report, encoding="utf-8")
 
-            artifacts = [
-                summary_json_path,
-                scores_csv_path,
-                fold_csv_path,
-                quantiles_csv_path,
-                plot_path,
-                report_md_path,
-                report_html_path,
-            ]
-            progress_bar.step("reports")
+        artifacts = [
+            summary_json_path,
+            scores_csv_path,
+            fold_csv_path,
+            quantiles_csv_path,
+            plot_path,
+            report_md_path,
+            report_html_path,
+        ]
 
-            return ModuleResult(report_dir=run_dir, artifacts=artifacts)
+        return ModuleResult(report_dir=run_dir, artifacts=artifacts)

@@ -17,7 +17,7 @@ from scipy import stats
 
 from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
-from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.progress import ModuleProgress, StatusTimer
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -693,7 +693,7 @@ class ProbabilityMarkovModule:
         run_dir = Path(output_dir) / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+        with StatusTimer(f"{self.name}: Loading & preparing", enabled=self.progress):
             features = _read_table_with_date_index(feature_path)
             labels = _read_table_with_date_index(label_path)
             merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -725,10 +725,6 @@ class ProbabilityMarkovModule:
                 if valid_targets and numeric_features
                 else merged
             )
-            progress_bar.step("load")
-
-            all_transitions: list[dict[str, Any]] = []
-            all_meta_features: list[dict[str, Any]] = []
 
             # Adjust min samples adaptively based on min_pattern_samples and min_support
             eff_min_samples = max(
@@ -737,6 +733,14 @@ class ProbabilityMarkovModule:
             )
             eff_min_samples = min(eff_min_samples, max(10, int(len(model_frame) * 0.15)))
 
+            total_evals = len(numeric_features) * len(valid_targets)
+
+        all_transitions: list[dict[str, Any]] = []
+        all_meta_features: list[dict[str, Any]] = []
+
+        with ModuleProgress(
+            self.name, total=max(1, total_evals), unit="feat", enabled=self.progress
+        ) as progress_bar:
             for target_col in valid_targets:
                 for feat in numeric_features:
                     t_list, meta_f = _compute_markov_transitions_for_feature(
@@ -750,131 +754,132 @@ class ProbabilityMarkovModule:
                     all_transitions.extend(t_list)
                     if meta_f:
                         all_meta_features.append(meta_f)
+                    progress_bar.step(f"{feat}->{target_col}")
 
-            transitions_df = pd.DataFrame(all_transitions)
-            progress_bar.step("markov_transitions")
+            if total_evals == 0:
+                progress_bar.step("no_valid_targets")
 
-            # Extract top patterns
-            if not transitions_df.empty:
-                top_patterns = transitions_df[
-                    (transitions_df["excess_probability"] >= self.min_excess_probability)
-                    & (transitions_df["sample_count"] >= eff_min_samples)
-                    & (transitions_df["lift"] >= self.min_lift)
-                ].copy()
+        transitions_df = pd.DataFrame(all_transitions)
 
-                if self.objective == "support_weighted":
-                    top_patterns["utility_score"] = top_patterns["excess_probability"] * np.sqrt(
-                        top_patterns["sample_count"]
-                    )
-                    top_patterns.sort_values(
-                        by=["utility_score", "excess_probability", "lift", "sample_count"],
-                        ascending=[False, False, False, False],
-                        inplace=True,
-                    )
-                else:
-                    top_patterns.sort_values(
-                        by=["excess_probability", "lift", "sample_count"],
-                        ascending=[False, False, False],
-                        inplace=True,
-                    )
+        # Extract top patterns
+        if not transitions_df.empty:
+            top_patterns = transitions_df[
+                (transitions_df["excess_probability"] >= self.min_excess_probability)
+                & (transitions_df["sample_count"] >= eff_min_samples)
+                & (transitions_df["lift"] >= self.min_lift)
+            ].copy()
+
+            if self.objective == "support_weighted":
+                top_patterns["utility_score"] = top_patterns["excess_probability"] * np.sqrt(
+                    top_patterns["sample_count"]
+                )
+                top_patterns.sort_values(
+                    by=["utility_score", "excess_probability", "lift", "sample_count"],
+                    ascending=[False, False, False, False],
+                    inplace=True,
+                )
             else:
-                top_patterns = pd.DataFrame()
+                top_patterns.sort_values(
+                    by=["excess_probability", "lift", "win_rate", "sample_count"],
+                    ascending=[False, False, False, False],
+                    inplace=True,
+                )
+        else:
+            top_patterns = pd.DataFrame()
 
-            # Generate Artifacts
-            plot_path = run_dir / "markov_heatmap.png"
-            _plot_markov_heatmaps(transitions_df, plot_path)
+        # Generate plots
+        plot_path = run_dir / "markov_heatmap.png"
+        _plot_markov_heatmaps(transitions_df, plot_path)
 
-            transitions_csv_path = _write_csv(
-                run_dir / "markov_transitions.csv",
-                transitions_df,
-            )
+        # Metadata
+        metadata = ProbabilityMarkovRunMetadata(
+            module=self.name,
+            created_at=datetime.now(UTC).isoformat(),
+            execution_time=_format_duration(time.perf_counter() - start_time),
+            feature_csv=str(feature_csv),
+            label_csv=str(label_csv),
+            join_strategy=join_strategy,
+            feature_shape=DatasetShape(*features.shape),
+            label_shape=DatasetShape(*labels.shape),
+            merged_shape=DatasetShape(*merged.shape),
+            n_bins=self.n_bins,
+            min_pattern_samples=eff_min_samples,
+            min_support=self.min_support,
+            objective=self.objective,
+            features_analyzed=numeric_features,
+            targets=valid_targets,
+            model_rows=len(model_frame),
+            transitions_count=len(transitions_df),
+            top_patterns_count=len(top_patterns),
+        )
 
-            top_patterns_csv_path = _write_csv(
-                run_dir / "top_sequential_patterns.csv",
-                top_patterns,
-            )
+        transitions_csv_path = _write_csv(
+            run_dir / "markov_transitions.csv", transitions_df
+        )
+        top_patterns_csv_path = _write_csv(
+            run_dir / "top_sequential_patterns.csv", top_patterns
+        )
 
-            metadata = ProbabilityMarkovRunMetadata(
-                module=self.name,
-                created_at=datetime.now(UTC).isoformat(),
-                execution_time=_format_duration(time.perf_counter() - start_time),
-                feature_csv=str(feature_csv),
-                label_csv=str(label_csv),
-                join_strategy=join_strategy,
-                feature_shape=DatasetShape(*features.shape),
-                label_shape=DatasetShape(*labels.shape),
-                merged_shape=DatasetShape(*merged.shape),
-                n_bins=self.n_bins,
-                min_pattern_samples=eff_min_samples,
-                min_support=self.min_support,
-                objective=self.objective,
-                features_analyzed=numeric_features,
-                targets=valid_targets,
-                model_rows=len(model_frame),
-                transitions_count=len(transitions_df),
-                top_patterns_count=len(top_patterns),
-            )
-
-            def _clean_pattern_for_json(r: dict[str, Any]) -> dict[str, Any]:
-                return {
-                    "feature": str(r.get("feature", "")),
-                    "transition_label": str(r.get("transition_label", "")),
-                    "target": str(r.get("target", "")),
-                    "target_class": r.get("target_class"),
-                    "sample_count": int(r.get("sample_count", 0)),
-                    "support": float(r.get("support", 0.0)),
-                    "win_rate": float(r.get("win_rate", 0.0)),
-                    "static_win_rate": float(r.get("static_win_rate", 0.0)),
-                    "excess_probability": float(r.get("excess_probability", 0.0)),
-                    "lift": float(r.get("lift", 1.0)),
-                    "p_value_fisher": float(r.get("p_value_fisher", 1.0)),
-                    "credible_interval_low_95": float(r.get("credible_interval_low_95", 0.0)),
-                    "credible_interval_high_95": float(r.get("credible_interval_high_95", 1.0)),
-                }
-
-            summary_payload: dict[str, Any] = {
-                **asdict(metadata),
-                "top_patterns": [
-                    _clean_pattern_for_json(r)
-                    for r in top_patterns.head(10).to_dict(orient="records")
-                ]
-                if not top_patterns.empty
-                else [],
-                "summary_metrics": {
-                    "total_transitions_evaluated": len(transitions_df),
-                    "alpha_patterns_count": len(top_patterns),
-                    "max_excess_probability": _round(
-                        float(top_patterns["excess_probability"].max())
-                    )
-                    if not top_patterns.empty
-                    else 0.0,
-                    "max_win_rate": _round(float(top_patterns["win_rate"].max()))
-                    if not top_patterns.empty
-                    else 0.0,
-                    "max_lift": _round(float(top_patterns["lift"].max()))
-                    if not top_patterns.empty
-                    else 1.0,
-                },
+        def _clean_pattern_for_json(r: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "feature": str(r.get("feature", "")),
+                "state_from": str(r.get("state_from", "")),
+                "state_to": str(r.get("state_to", "")),
+                "transition_label": str(r.get("transition_label", "")),
+                "target": str(r.get("target", "")),
+                "target_class": r.get("target_class"),
+                "sample_count": int(r.get("sample_count", 0)),
+                "support": float(r.get("support", 0.0)),
+                "win_rate": float(r.get("win_rate", 0.0)),
+                "static_win_rate": float(r.get("static_win_rate", 0.0)),
+                "excess_probability": float(r.get("excess_probability", 0.0)),
+                "lift": float(r.get("lift", 1.0)),
+                "p_value_fisher": float(r.get("p_value_fisher", 1.0)),
+                "credible_interval_low_95": float(r.get("credible_interval_low_95", 0.0)),
+                "credible_interval_high_95": float(r.get("credible_interval_high_95", 1.0)),
             }
-            summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
 
-            markdown_report = _render_markdown(metadata, top_patterns)
-            report_md_path = run_dir / "report.md"
-            report_md_path.write_text(markdown_report, encoding="utf-8")
-
-            html_report = _render_html(metadata, markdown_report, top_patterns)
-            report_html_path = run_dir / "report.html"
-            report_html_path.write_text(html_report, encoding="utf-8")
-
-            progress_bar.step("reports")
-
-            artifacts = [
-                summary_json_path,
-                transitions_csv_path,
-                top_patterns_csv_path,
-                plot_path,
-                report_md_path,
-                report_html_path,
+        summary_payload: dict[str, Any] = {
+            **asdict(metadata),
+            "top_patterns": [
+                _clean_pattern_for_json(r)
+                for r in top_patterns.head(10).to_dict(orient="records")
             ]
+            if not top_patterns.empty
+            else [],
+            "summary_metrics": {
+                "total_transitions_evaluated": len(transitions_df),
+                "alpha_patterns_count": len(top_patterns),
+                "max_excess_probability": _round(
+                    float(top_patterns["excess_probability"].max())
+                )
+                if not top_patterns.empty
+                else 0.0,
+                "max_win_rate": _round(float(top_patterns["win_rate"].max()))
+                if not top_patterns.empty
+                else 0.0,
+                "max_lift": _round(float(top_patterns["lift"].max()))
+                if not top_patterns.empty
+                else 1.0,
+            },
+        }
+        summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
 
-            return ModuleResult(report_dir=run_dir, artifacts=artifacts)
+        markdown_report = _render_markdown(metadata, top_patterns)
+        report_md_path = run_dir / "report.md"
+        report_md_path.write_text(markdown_report, encoding="utf-8")
+
+        html_report = _render_html(metadata, markdown_report, top_patterns)
+        report_html_path = run_dir / "report.html"
+        report_html_path.write_text(html_report, encoding="utf-8")
+
+        artifacts = [
+            summary_json_path,
+            transitions_csv_path,
+            top_patterns_csv_path,
+            plot_path,
+            report_md_path,
+            report_html_path,
+        ]
+
+        return ModuleResult(report_dir=run_dir, artifacts=artifacts)

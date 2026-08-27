@@ -18,7 +18,7 @@ from sklearn.metrics import roc_auc_score
 
 from fldataprofiler.config import get_module_config
 from fldataprofiler.modules.base import ModuleResult
-from fldataprofiler.modules.progress import ModuleProgress
+from fldataprofiler.modules.progress import ModuleProgress, StatusTimer
 from fldataprofiler.modules.statistics import DatasetShape
 from fldataprofiler.utils import (
     _date_columns,
@@ -184,6 +184,7 @@ def _build_scorecard(
     n_bins: int = DEFAULT_N_BINS,
     max_features: int = DEFAULT_MAX_FEATURES,
     min_iv: float = DEFAULT_MIN_IV,
+    progress_bar: ModuleProgress | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any], pd.Series, pd.Series]:
     """Train multivariate WoE Logistic Regression and scale coefficients into additive scorecard points."""
     y_binary = (target_series == target_series.iloc[0]).astype(int)
@@ -207,6 +208,8 @@ def _build_scorecard(
             "bin_details": bin_details,
             "woe_series": woe_series,
         }
+        if progress_bar is not None:
+            progress_bar.step(f"WoE:{f}")
 
     # Select top features with positive IV >= min_iv
     selected_features = [
@@ -768,7 +771,7 @@ class ProbabilityScorecardModule:
         run_dir = Path(output_dir) / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=4, enabled=self.progress) as progress_bar:
+        with StatusTimer(f"{self.name}: Loading & preparing", enabled=self.progress):
             features = _read_table_with_date_index(feature_path)
             labels = _read_table_with_date_index(label_path)
             merged, feature_columns, label_columns, join_strategy = _merge_inputs(
@@ -799,12 +802,15 @@ class ProbabilityScorecardModule:
                 if valid_targets and numeric_features
                 else merged
             )
-            progress_bar.step("load")
 
+            total_evals = len(numeric_features)
             # Scorecard training on primary target
             primary_target = valid_targets[0] if valid_targets else "target"
             target_series = model_frame[primary_target] if primary_target in model_frame else pd.Series(dtype=int)
 
+        with ModuleProgress(
+            self.name, total=max(1, total_evals), unit="feat", enabled=self.progress
+        ) as progress_bar:
             points_df, calibration_df, metrics, score_series, prob_series = _build_scorecard(
                 model_frame=model_frame,
                 feature_columns=numeric_features,
@@ -815,77 +821,78 @@ class ProbabilityScorecardModule:
                 n_bins=self.n_bins,
                 max_features=self.max_features,
                 min_iv=self.min_iv,
-            )
-            progress_bar.step("scorecard_fit")
-
-            # Generate Artifacts
-            plot_path = run_dir / "score_distribution_plot.png"
-            y_binary = (target_series == 1).astype(int) if (1 in target_series.values and 0 in target_series.values) else (target_series == target_series.iloc[0]).astype(int)
-            _plot_score_distributions(score_series, y_binary.loc[score_series.index], calibration_df, metrics["ks_statistic"], plot_path)
-
-            points_csv_path = _write_csv(
-                run_dir / "scorecard_points.csv",
-                points_df,
+                progress_bar=progress_bar,
             )
 
-            calibration_csv_path = _write_csv(
-                run_dir / "score_to_probability.csv",
-                calibration_df,
-            )
+            if total_evals == 0:
+                progress_bar.step("no_valid_features")
 
-            metadata = ProbabilityScorecardRunMetadata(
-                module=self.name,
-                created_at=datetime.now(UTC).isoformat(),
-                execution_time=_format_duration(time.perf_counter() - start_time),
-                feature_csv=str(feature_csv),
-                label_csv=str(label_csv),
-                join_strategy=join_strategy,
-                feature_shape=DatasetShape(*features.shape),
-                label_shape=DatasetShape(*labels.shape),
-                merged_shape=DatasetShape(*merged.shape),
-                base_score=self.base_score,
-                base_odds=self.base_odds,
-                pdo=self.pdo,
-                n_bins=self.n_bins,
-                max_features=self.max_features,
-                min_iv=self.min_iv,
-                features_selected=metrics["selected_features"],
-                targets=valid_targets,
-                model_rows=len(model_frame),
-                auc=metrics["auc"],
-                ks_statistic=metrics["ks_statistic"],
-            )
+        # Generate Artifacts
+        plot_path = run_dir / "score_distribution_plot.png"
+        y_binary = (target_series == 1).astype(int) if (1 in target_series.values and 0 in target_series.values) else (target_series == target_series.iloc[0]).astype(int)
+        _plot_score_distributions(score_series, y_binary.loc[score_series.index], calibration_df, metrics["ks_statistic"], plot_path)
 
-            summary_payload: dict[str, Any] = {
-                **asdict(metadata),
-                "model_metrics": metrics,
-                "score_deciles": calibration_df.to_dict(orient="records"),
-                "summary_metrics": {
-                    "roc_auc": metrics["auc"],
-                    "ks_statistic": metrics["ks_statistic"],
-                    "features_count": metrics["features_count"],
-                    "base_point_offset": metrics["base_offset"],
-                },
-            }
-            summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
+        points_csv_path = _write_csv(
+            run_dir / "scorecard_points.csv",
+            points_df,
+        )
 
-            markdown_report = _render_markdown(metadata, points_df, calibration_df)
-            report_md_path = run_dir / "report.md"
-            report_md_path.write_text(markdown_report, encoding="utf-8")
+        calibration_csv_path = _write_csv(
+            run_dir / "score_to_probability.csv",
+            calibration_df,
+        )
 
-            html_report = _render_html(metadata, markdown_report, points_df, calibration_df)
-            report_html_path = run_dir / "report.html"
-            report_html_path.write_text(html_report, encoding="utf-8")
+        metadata = ProbabilityScorecardRunMetadata(
+            module=self.name,
+            created_at=datetime.now(UTC).isoformat(),
+            execution_time=_format_duration(time.perf_counter() - start_time),
+            feature_csv=str(feature_csv),
+            label_csv=str(label_csv),
+            join_strategy=join_strategy,
+            feature_shape=DatasetShape(*features.shape),
+            label_shape=DatasetShape(*labels.shape),
+            merged_shape=DatasetShape(*merged.shape),
+            base_score=self.base_score,
+            base_odds=self.base_odds,
+            pdo=self.pdo,
+            n_bins=self.n_bins,
+            max_features=self.max_features,
+            min_iv=self.min_iv,
+            features_selected=metrics["selected_features"],
+            targets=valid_targets,
+            model_rows=len(model_frame),
+            auc=metrics["auc"],
+            ks_statistic=metrics["ks_statistic"],
+        )
 
-            progress_bar.step("reports")
+        summary_payload: dict[str, Any] = {
+            **asdict(metadata),
+            "model_metrics": metrics,
+            "score_deciles": calibration_df.to_dict(orient="records"),
+            "summary_metrics": {
+                "roc_auc": metrics["auc"],
+                "ks_statistic": metrics["ks_statistic"],
+                "features_count": metrics["features_count"],
+                "base_point_offset": metrics["base_offset"],
+            },
+        }
+        summary_json_path = _write_json(run_dir / "summary.json", summary_payload)
 
-            artifacts = [
-                summary_json_path,
-                points_csv_path,
-                calibration_csv_path,
-                plot_path,
-                report_md_path,
-                report_html_path,
-            ]
+        markdown_report = _render_markdown(metadata, points_df, calibration_df)
+        report_md_path = run_dir / "report.md"
+        report_md_path.write_text(markdown_report, encoding="utf-8")
 
-            return ModuleResult(report_dir=run_dir, artifacts=artifacts)
+        html_report = _render_html(metadata, markdown_report, points_df, calibration_df)
+        report_html_path = run_dir / "report.html"
+        report_html_path.write_text(html_report, encoding="utf-8")
+
+        artifacts = [
+            summary_json_path,
+            points_csv_path,
+            calibration_csv_path,
+            plot_path,
+            report_md_path,
+            report_html_path,
+        ]
+
+        return ModuleResult(report_dir=run_dir, artifacts=artifacts)
