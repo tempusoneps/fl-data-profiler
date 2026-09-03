@@ -15,6 +15,7 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "scipy>=1.16.0",
     "shap>=0.48.0",
+    "signalx",
     "statsmodels>=0.14.6",
     "tqdm>=4.67.0",
     "xgboost>=3.0.0",
@@ -62,3 +63,4 @@ python_files = ["test_*.py"]
 [tool.uv.sources]
 autofcholv = { git = "https://github.com/tempusoneps/autofcholv.git", branch = "develop" }
 labelohlcv = { git = "https://github.com/tempusoneps/labelohlcv.git", branch = "develop" }
+signalx = { git = "https://github.com/tempusoneps/signalx.git", branch = "develop" }

@@ -3,10 +3,6 @@
 # Exit on error, pipe failures, and unset variables
 set -euo pipefail
 
-uv lock --upgrade-package autofcholv
-uv lock --upgrade-package labelohlcv
-uv sync
-
 # Determine script & project directories to ensure relative path works from any working directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -16,6 +12,7 @@ DATASET_DIR="${PROJECT_DIR}/datasets"
 OHLCV_DATASET="${OHLCV_DATASET:-${DATASET_DIR}/VN30F1M_5m.csv}"
 LABEL_DATASET="${LABEL_DATASET:-${DATASET_DIR}/label.csv}"
 FEATURE_DATASET="${FEATURE_DATASET:-${DATASET_DIR}/feature.parquet}"
+SIGNAL_DATASET="${SIGNAL_DATASET:-${DATASET_DIR}/signal.csv}"
 
 OHLCV_URL="https://raw.githubusercontent.com/tempusoneps/vn-stock-data/refs/heads/main/VN30F1M/data_ohlcv/VN30F1M_5m.csv"
 
@@ -30,7 +27,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       echo "Usage: $0 [OPTIONS]"
-      echo "Automatically prepare OHLCV (CSV), Labels (CSV), and Features (Parquet) datasets inside datasets/ directory."
+      echo "Automatically prepare OHLCV (CSV), Labels (CSV), Features (Parquet), and Signals (CSV) datasets inside datasets/ directory."
       echo ""
       echo "Options:"
       echo "  -f, --force    Force re-download and re-generation even if files already exist"
@@ -44,6 +41,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+uv lock --upgrade-package autofcholv
+uv lock --upgrade-package labelohlcv
+uv lock --upgrade-package signalx
+uv sync
 
 # Helper function to execute CLI commands (native, via uv, or from virtualenv)
 run_cli() {
@@ -98,6 +100,15 @@ if [ "$FORCE" = true ] || [ ! -f "$FEATURE_DATASET" ]; then
   echo "[PASS] Successfully generated FEATURE_DATASET (Parquet): ${FEATURE_DATASET}"
 else
   echo "[SKIP] FEATURE_DATASET (Parquet) already exists: ${FEATURE_DATASET}"
+fi
+
+# 4. Check & Generate SIGNAL_DATASET (CSV via signalx)
+if [ "$FORCE" = true ] || [ ! -f "$SIGNAL_DATASET" ]; then
+  echo "[INFO] SIGNAL_DATASET does not exist or force requested. Generating signals..."
+  run_cli signalx generate "$OHLCV_DATASET" --output "$SIGNAL_DATASET"
+  echo "[PASS] Successfully generated SIGNAL_DATASET (CSV): ${SIGNAL_DATASET}"
+else
+  echo "[SKIP] SIGNAL_DATASET (CSV) already exists: ${SIGNAL_DATASET}"
 fi
 
 echo "=== PREPARATION COMPLETE ==="

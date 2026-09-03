@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -9,13 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.metrics import (
-    accuracy_score,
-    balanced_accuracy_score,
-    f1_score,
-)
-from sklearn.preprocessing import LabelEncoder
-from xgboost import XGBClassifier
+from scipy.stats import beta
 
 from fldataprofiler.modules.base import ModuleResult
 from fldataprofiler.modules.progress import ModuleProgress
@@ -25,7 +21,6 @@ from fldataprofiler.utils import (
     _format_duration,
     _markdown_table,
     _merge_inputs,
-    _numeric_series,
     _read_table_with_date_index,
     _round,
     _sample_rows,
@@ -33,7 +28,7 @@ from fldataprofiler.utils import (
     _write_json,
 )
 
-MAX_ROWS = 20_000
+MAX_ROWS = 50_000
 RANDOM_STATE = 42
 TARGET_LABEL = "allow_entry"
 
@@ -52,6 +47,55 @@ class SignalRunMetadata:
     model_rows: int
     signal_features_count: int
     target_label: str
+
+
+def _normalize_signal_state(val: object) -> str:
+    """Normalize any signal value into one of four canonical states: buy, sell, hold, none."""
+    if pd.isna(val):
+        return "none"
+    s = str(val).strip().lower()
+    if s in ["buy", "long", "b", "1", "1.0"]:
+        return "buy"
+    if s in ["sell", "short", "s", "-1", "-1.0"]:
+        return "sell"
+    if s in ["hold", "0", "0.0", "neutral"]:
+        return "hold"
+    return "none"
+
+
+def _classify_outcome(signal_state: str, target_val: str) -> str:
+    """Classify outcome into: 'true_alpha', 'sideway_trap', 'reversal_trap', 'vol_trap', or 'other_trap'."""
+    s = signal_state.lower().strip()
+    t = str(target_val).lower().strip()
+
+    is_bull = any(w in t for w in ["buy", "long", "bull", "1"])
+    is_bear = any(w in t for w in ["sell", "short", "bear", "-1"])
+    is_sideway = any(w in t for w in ["sideway", "neutral", "narrow", "flat", "0", "range"])
+    is_none = any(w in t for w in ["none", "no - none", "lockout", "skip"])
+
+    if s == "buy":
+        if is_bull:
+            return "true_alpha"
+        if is_bear:
+            return "reversal_trap"
+        if is_sideway:
+            return "sideway_trap"
+        if is_none:
+            return "vol_trap"
+        return "other_trap"
+
+    if s == "sell":
+        if is_bear:
+            return "true_alpha"
+        if is_bull:
+            return "reversal_trap"
+        if is_sideway:
+            return "sideway_trap"
+        if is_none:
+            return "vol_trap"
+        return "other_trap"
+
+    return "inactive"
 
 
 class SignalAnalysisModule:
@@ -93,34 +137,28 @@ class SignalAnalysisModule:
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=3, enabled=self.progress) as progress_bar:
-            # 1. Single Signal Analysis
-            single_signal_df = _evaluate_single_signals(model_frame, signal_columns, target_col)
-            progress_bar.step("single_signals")
-
-            # 2. Combined Signal Model
-            combined_model_res, combined_importances_df = _fit_combined_signal_model(
+        with ModuleProgress(self.name, total=2, enabled=self.progress) as progress_bar:
+            # 1. Discrete Conditional Probability & Bayesian Lift Matrix
+            prob_matrix_df = _compute_discrete_probability_matrix(
                 model_frame, signal_columns, target_col
             )
-            progress_bar.step("combined_model")
+            progress_bar.step("probability_matrix")
 
-            # 3. Correlation / Redundancy Matrix
-            redundancy_df = _calculate_signal_redundancy(model_frame, signal_columns)
-            progress_bar.step("redundancy")
+            # 2. Whipsaw & Trap Diagnosis
+            trap_df, top_clean_df = _compute_trap_diagnosis(
+                model_frame, signal_columns, target_col
+            )
+            progress_bar.step("trap_diagnosis")
 
-        # Generate PNG Charts
+        # Generate Visual Charts
         chart_artifacts: list[Path] = []
-        top_single_chart_path = run_dir / "top_single_signals.png"
-        if _write_top_single_signals_chart(top_single_chart_path, single_signal_df):
-            chart_artifacts.append(top_single_chart_path)
+        trap_chart_path = run_dir / "signal_trap_distribution.png"
+        if _write_trap_distribution_chart(trap_chart_path, top_clean_df):
+            chart_artifacts.append(trap_chart_path)
 
-        combined_imp_chart_path = run_dir / "combined_signal_importance.png"
-        if _write_combined_importance_chart(combined_imp_chart_path, combined_importances_df):
-            chart_artifacts.append(combined_imp_chart_path)
-
-        heatmap_path = run_dir / "signal_redundancy_heatmap.png"
-        if _write_signal_correlation_heatmap(heatmap_path, model_frame, combined_importances_df):
-            chart_artifacts.append(heatmap_path)
+        prob_chart_path = run_dir / "top_signal_probabilities.png"
+        if _write_top_probabilities_chart(prob_chart_path, prob_matrix_df):
+            chart_artifacts.append(prob_chart_path)
 
         metadata = SignalRunMetadata(
             module=self.name,
@@ -137,16 +175,13 @@ class SignalAnalysisModule:
             target_label=target_col,
         )
 
-        insights = _generate_signal_insights(
-            single_signal_df, combined_model_res, combined_importances_df, redundancy_df
-        )
+        insights = _generate_signal_insights(prob_matrix_df, trap_df, top_clean_df)
         markdown = _render_markdown(
             metadata,
             insights,
-            single_signal_df,
-            combined_model_res,
-            combined_importances_df,
-            redundancy_df,
+            top_clean_df,
+            trap_df,
+            prob_matrix_df,
             chart_artifacts,
         )
 
@@ -155,7 +190,7 @@ class SignalAnalysisModule:
 
         html_path = run_dir / "report.html"
         html_path.write_text(
-            _render_html(markdown, single_signal_df, combined_model_res, combined_importances_df),
+            _render_html(markdown, top_clean_df, prob_matrix_df),
             encoding="utf-8",
         )
 
@@ -165,17 +200,19 @@ class SignalAnalysisModule:
                 {
                     "metadata": asdict(metadata),
                     "insights": insights,
-                    "combined_model": combined_model_res,
-                    "top_single_signals": single_signal_df.head(50).to_dict(orient="records"),
-                    "combined_importances": combined_importances_df.head(50).to_dict(
-                        orient="records"
-                    ),
-                    "redundant_pairs": redundancy_df.head(30).to_dict(orient="records"),
+                    "top_clean_signals": top_clean_df.head(30).to_dict(orient="records"),
+                    "top_whipsaw_signals": trap_df.sort_values("sideway_trap_pct", ascending=False)
+                    .head(20)
+                    .to_dict(orient="records"),
+                    "highest_reversal_risk": trap_df.sort_values("adverse_risk_ratio", ascending=False)
+                    .head(20)
+                    .to_dict(orient="records"),
+                    "top_probabilities": prob_matrix_df.head(30).to_dict(orient="records"),
                 },
             ),
-            _write_csv(run_dir / "single_signal_scores.csv", single_signal_df),
-            _write_csv(run_dir / "combined_signal_importance.csv", combined_importances_df),
-            _write_csv(run_dir / "signal_redundancy.csv", redundancy_df),
+            _write_csv(run_dir / "signal_probability_matrix.csv", prob_matrix_df),
+            _write_csv(run_dir / "signal_trap_diagnosis.csv", trap_df),
+            _write_csv(run_dir / "top_clean_signals.csv", top_clean_df),
             report_md_path,
             html_path,
             *chart_artifacts,
@@ -184,215 +221,265 @@ class SignalAnalysisModule:
         return ModuleResult(report_dir=run_dir, artifacts=artifacts)
 
 
-def _evaluate_single_signals(
+def _compute_discrete_probability_matrix(
     df: pd.DataFrame, signal_columns: list[str], target_col: str
 ) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
+    """Compute discrete conditional probabilities, lift, Bayesian credible interval, and WoE/IV."""
     valid_df = df.dropna(subset=[target_col]).copy()
     total_samples = len(valid_df)
+    if total_samples == 0:
+        return pd.DataFrame()
+
+    unique_classes = sorted(valid_df[target_col].astype(str).unique())
+    base_rates = {
+        cls: (valid_df[target_col].astype(str) == cls).sum() / total_samples
+        for cls in unique_classes
+    }
+    class_totals = {
+        cls: (valid_df[target_col].astype(str) == cls).sum()
+        for cls in unique_classes
+    }
+
+    rows: list[dict[str, object]] = []
+    canonical_states = ["buy", "sell", "hold", "none"]
 
     for col in signal_columns:
-        s = _numeric_series(valid_df[col]).fillna(0)
-        active_mask = s != 0
-        active_count = int(active_mask.sum())
-        active_pct = _round((active_count / total_samples) * 100 if total_samples > 0 else 0)
+        norm_series = valid_df[col].apply(_normalize_signal_state)
+        for state in canonical_states:
+            state_mask = norm_series == state
+            state_count = int(state_mask.sum())
+            if state_count == 0:
+                continue
 
-        buy_precision, buy_recall, buy_f1 = 0.0, 0.0, 0.0
-        sell_precision, sell_recall, sell_f1 = 0.0, 0.0, 0.0
+            state_pct = _round((state_count / total_samples) * 100)
 
-        if active_count >= 5:
-            # Check Buy signal alignment (signal > 0 or 1 vs Yes - Buy)
-            buy_mask = s > 0
-            if buy_mask.sum() > 0:
-                true_buy = valid_df[target_col] == "Yes - Buy"
-                tp_buy = (buy_mask & true_buy).sum()
-                fp_buy = (buy_mask & ~true_buy).sum()
-                fn_buy = (~buy_mask & true_buy).sum()
-                buy_precision = float(tp_buy / (tp_buy + fp_buy)) if (tp_buy + fp_buy) > 0 else 0.0
-                buy_recall = float(tp_buy / (tp_buy + fn_buy)) if (tp_buy + fn_buy) > 0 else 0.0
-                buy_f1 = (
-                    (2 * buy_precision * buy_recall / (buy_precision + buy_recall))
-                    if (buy_precision + buy_recall) > 0
-                    else 0.0
+            for cls in unique_classes:
+                class_mask = valid_df[target_col].astype(str) == cls
+                joint_count = int((state_mask & class_mask).sum())
+
+                cond_prob = joint_count / state_count if state_count > 0 else 0.0
+                base_prob = base_rates[cls]
+                lift = cond_prob / base_prob if base_prob > 0 else 0.0
+
+                # 95% Bayesian Credible Interval with Beta(0.5, 0.5) Jeffreys Prior
+                ci_lower = float(beta.ppf(0.025, joint_count + 0.5, state_count - joint_count + 0.5))
+                ci_upper = float(beta.ppf(0.975, joint_count + 0.5, state_count - joint_count + 0.5))
+
+                # Weight of Evidence (WoE) & IV contribution
+                target_total = class_totals[cls]
+                non_target_total = total_samples - target_total
+                good_rate = (joint_count + 0.5) / (target_total + 1.0)
+                bad_rate = ((state_count - joint_count) + 0.5) / (non_target_total + 1.0)
+                woe = float(np.log(good_rate / bad_rate))
+                iv_contrib = float((good_rate - bad_rate) * woe)
+
+                rows.append(
+                    {
+                        "signal_name": col,
+                        "signal_state": state,
+                        "target": target_col,
+                        "target_class": cls,
+                        "count": state_count,
+                        "state_pct": state_pct,
+                        "class_count": joint_count,
+                        "conditional_prob": _round(cond_prob),
+                        "base_rate": _round(base_prob),
+                        "lift": _round(lift),
+                        "ci_lower_95": _round(ci_lower),
+                        "ci_upper_95": _round(ci_upper),
+                        "woe": _round(woe),
+                        "iv_contrib": _round(iv_contrib),
+                    }
                 )
-
-            # Check Sell signal alignment (signal < 0 or -1 vs Yes - Sell)
-            sell_mask = s < 0
-            if sell_mask.sum() > 0:
-                true_sell = valid_df[target_col] == "Yes - Sell"
-                tp_sell = (sell_mask & true_sell).sum()
-                fp_sell = (sell_mask & ~true_sell).sum()
-                fn_sell = (~sell_mask & true_sell).sum()
-                sell_precision = (
-                    float(tp_sell / (tp_sell + fp_sell)) if (tp_sell + fp_sell) > 0 else 0.0
-                )
-                sell_recall = (
-                    float(tp_sell / (tp_sell + fn_sell)) if (tp_sell + fn_sell) > 0 else 0.0
-                )
-                sell_f1 = (
-                    (2 * sell_precision * sell_recall / (sell_precision + sell_recall))
-                    if (sell_precision + sell_recall) > 0
-                    else 0.0
-                )
-
-        max_precision = max(buy_precision, sell_precision)
-        max_f1 = max(buy_f1, sell_f1)
-
-        rows.append(
-            {
-                "signal_name": col,
-                "active_count": active_count,
-                "active_pct": active_pct,
-                "buy_precision": _round(buy_precision),
-                "buy_recall": _round(buy_recall),
-                "buy_f1": _round(buy_f1),
-                "sell_precision": _round(sell_precision),
-                "sell_recall": _round(sell_recall),
-                "sell_f1": _round(sell_f1),
-                "max_precision": _round(max_precision),
-                "max_f1": _round(max_f1),
-            }
-        )
 
     res_df = pd.DataFrame(rows)
     if not res_df.empty:
-        res_df = res_df.sort_values("max_precision", ascending=False).reset_index(drop=True)
+        res_df = res_df.sort_values(["lift", "count"], ascending=[False, False]).reset_index(
+            drop=True
+        )
     return res_df
 
 
-def _fit_combined_signal_model(
+def _compute_trap_diagnosis(
     df: pd.DataFrame, signal_columns: list[str], target_col: str
-) -> tuple[dict[str, object], pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Diagnose Whipsaw & Trap patterns: True Alpha % vs Sideway Trap % vs Reversal Trap %."""
     valid_df = df.dropna(subset=[target_col]).copy()
-    if len(valid_df) < 30:
-        return {}, pd.DataFrame()
+    total_samples = len(valid_df)
+    if total_samples == 0:
+        return pd.DataFrame(), pd.DataFrame()
 
-    x = valid_df[signal_columns].apply(_numeric_series).fillna(0)
-    encoder = LabelEncoder()
-    y = encoder.fit_transform(valid_df[target_col].astype(str))
-    class_names = list(encoder.classes_)
+    unique_classes = [str(c) for c in valid_df[target_col].unique()]
+    buy_map = {cls: _classify_outcome("buy", cls) for cls in unique_classes}
+    sell_map = {cls: _classify_outcome("sell", cls) for cls in unique_classes}
 
-    split_idx = int(len(valid_df) * 0.8)
-    x_train = x.iloc[:split_idx]
-    x_test = x.iloc[split_idx:]
-    y_train = y[:split_idx]
-    y_test = y[split_idx:]
+    trap_rows: list[dict[str, object]] = []
 
-    model = XGBClassifier(
-        objective="multi:softprob" if len(class_names) > 2 else "binary:logistic",
-        n_estimators=150,
-        max_depth=4,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
+    for col in signal_columns:
+        norm_series = valid_df[col].apply(_normalize_signal_state)
+        for state in ["buy", "sell"]:
+            mask = norm_series == state
+            count = int(mask.sum())
+            if count < 5:
+                continue
+
+            trigger_pct = _round((count / total_samples) * 100)
+            target_slice = valid_df.loc[mask, target_col].astype(str)
+            val_counts = target_slice.value_counts().to_dict()
+            outcome_map = buy_map if state == "buy" else sell_map
+
+            alpha_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) == "true_alpha")
+            sideway_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) == "sideway_trap")
+            reversal_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) == "reversal_trap")
+            vol_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) in ["vol_trap", "other_trap"])
+
+            alpha_pct = (alpha_cnt / count) * 100
+            sideway_pct = (sideway_cnt / count) * 100
+            reversal_pct = (reversal_cnt / count) * 100
+            vol_pct = (vol_cnt / count) * 100
+
+            clean_edge = alpha_pct - reversal_pct
+            adverse_risk = reversal_pct / (alpha_pct + 1e-6)
+
+            trap_rows.append(
+                {
+                    "signal_name": col,
+                    "signal_state": state,
+                    "trigger_count": count,
+                    "trigger_pct": trigger_pct,
+                    "true_alpha_pct": _round(alpha_pct),
+                    "sideway_trap_pct": _round(sideway_pct),
+                    "reversal_trap_pct": _round(reversal_pct),
+                    "vol_trap_pct": _round(vol_pct),
+                    "clean_edge": _round(clean_edge),
+                    "adverse_risk_ratio": _round(adverse_risk),
+                }
+            )
+
+    trap_df = pd.DataFrame(trap_rows)
+    if trap_df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    trap_df = trap_df.sort_values("clean_edge", ascending=False).reset_index(drop=True)
+
+    # Top clean signals: active count >= 20 (or >= 5 if dataset is small)
+    min_triggers = 20 if total_samples >= 500 else 5
+    top_clean_df = (
+        trap_df[trap_df["trigger_count"] >= min_triggers]
+        .sort_values("clean_edge", ascending=False)
+        .reset_index(drop=True)
     )
-    model.fit(x_train, y_train)
 
-    train_preds = model.predict(x_train)
-    test_preds = model.predict(x_test)
+    return trap_df, top_clean_df
 
-    train_bal_acc = float(balanced_accuracy_score(y_train, train_preds))
-    test_bal_acc = float(balanced_accuracy_score(y_test, test_preds))
-    test_acc = float(accuracy_score(y_test, test_preds))
-    test_f1 = float(f1_score(y_test, test_preds, average="weighted"))
 
-    imp_values = model.feature_importances_
-    imp_rows = [
-        {"signal_name": str(col), "importance": _round(float(val))}
-        for col, val in zip(signal_columns, imp_values, strict=False)
-    ]
-    imp_df = (
-        pd.DataFrame(imp_rows).sort_values("importance", ascending=False).reset_index(drop=True)
+def _write_trap_distribution_chart(path: Path, top_clean_df: pd.DataFrame) -> Path | None:
+    if top_clean_df.empty:
+        return None
+
+    plot_df = top_clean_df.head(15).copy()
+    plot_df["label"] = plot_df["signal_name"] + " (" + plot_df["signal_state"].str.upper() + ")"
+    plot_df = plot_df.iloc[::-1].reset_index(drop=True)
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    y_pos = np.arange(len(plot_df))
+    ax.barh(y_pos, plot_df["true_alpha_pct"], color="#2ecc71", label="True Alpha (Win)")
+    ax.barh(
+        y_pos,
+        plot_df["sideway_trap_pct"],
+        left=plot_df["true_alpha_pct"],
+        color="#f39c12",
+        label="Sideway Trap (Whipsaw)",
+    )
+    ax.barh(
+        y_pos,
+        plot_df["reversal_trap_pct"],
+        left=plot_df["true_alpha_pct"] + plot_df["sideway_trap_pct"],
+        color="#e74c3c",
+        label="Reversal Trap (Counter-trend)",
+    )
+    ax.barh(
+        y_pos,
+        plot_df["vol_trap_pct"],
+        left=plot_df["true_alpha_pct"] + plot_df["sideway_trap_pct"] + plot_df["reversal_trap_pct"],
+        color="#95a5a6",
+        label="Volatility / Lockout Trap",
     )
 
-    result_dict = {
-        "target": target_col,
-        "model": "XGBClassifier (Signals Only)",
-        "samples": len(valid_df),
-        "signal_features": len(signal_columns),
-        "score_train": _round(train_bal_acc),
-        "score_primary": _round(test_bal_acc),
-        "overfit_gap": _round(train_bal_acc - test_bal_acc),
-        "accuracy": _round(test_acc),
-        "balanced_accuracy": _round(test_bal_acc),
-        "f1_weighted": _round(test_f1),
-    }
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(plot_df["label"], fontsize=9)
+    ax.set_xlabel("Percentage of Triggers (%)")
+    ax.set_title("Top 15 Signals: True Alpha vs Whipsaw & Reversal Traps", fontsize=12, pad=15)
+    ax.set_xlim(0, 100)
+    ax.legend(loc="lower right", fontsize=9)
 
-    return result_dict, imp_df
+    for i, row in plot_df.iterrows():
+        edge_text = (
+            f"Edge: +{row['clean_edge']:.1f}%"
+            if row["clean_edge"] >= 0
+            else f"Edge: {row['clean_edge']:.1f}%"
+        )
+        ax.text(101, i, edge_text, va="center", fontsize=8, fontweight="bold", color="#2c3e50")
 
-
-def _calculate_signal_redundancy(df: pd.DataFrame, signal_columns: list[str]) -> pd.DataFrame:
-    x = df[signal_columns].apply(_numeric_series).fillna(0)
-    corr = x.corr().abs()
-
-    pairs: list[dict[str, object]] = []
-    cols = corr.columns
-    for i in range(len(cols)):
-        for j in range(i + 1, len(cols)):
-            c1, c2 = cols[i], cols[j]
-            val = corr.loc[c1, c2]
-            if val >= 0.70:
-                pairs.append({"signal_1": c1, "signal_2": c2, "correlation": _round(float(val))})
-
-    res_df = pd.DataFrame(pairs)
-    if not res_df.empty:
-        res_df = res_df.sort_values("correlation", ascending=False).reset_index(drop=True)
-    else:
-        res_df = pd.DataFrame(columns=["signal_1", "signal_2", "correlation"])
-    return res_df
-
-
-def _write_top_single_signals_chart(path: Path, single_df: pd.DataFrame) -> Path | None:
-    if single_df.empty:
-        return None
-    top = single_df.head(15).sort_values("max_precision", ascending=True)
-    if top.empty or top["max_precision"].sum() == 0:
-        return None
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.barh(top["signal_name"], top["max_precision"], color="#2b6cb0")
-    ax.set_title("Top 15 Single Signals by Precision for allow_entry")
-    ax.set_xlabel("Max Precision (Buy or Sell)")
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
     return path
 
 
-def _write_combined_importance_chart(path: Path, imp_df: pd.DataFrame) -> Path | None:
-    if imp_df.empty:
+def _write_top_probabilities_chart(path: Path, prob_df: pd.DataFrame) -> Path | None:
+    if prob_df.empty:
         return None
-    top = imp_df.head(15).sort_values("importance", ascending=True)
-    if top.empty or top["importance"].sum() == 0:
+
+    # Filter directional states with count >= 20 and positive target
+    filtered = (
+        prob_df[
+            prob_df["signal_state"].isin(["buy", "sell"])
+            & (prob_df["count"] >= 20)
+            & (~prob_df["target_class"].astype(str).str.lower().str.contains("sideway|none"))
+        ]
+        .sort_values("conditional_prob", ascending=False)
+        .head(15)
+        .copy()
+    )
+
+    if filtered.empty:
         return None
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.barh(top["signal_name"], top["importance"], color="#2f855a")
-    ax.set_title("Top 15 Signals by Combined XGBoost Feature Importance")
-    ax.set_xlabel("Gain Importance")
-    fig.tight_layout()
-    fig.savefig(path, dpi=160)
-    plt.close(fig)
-    return path
 
+    filtered["label"] = (
+        filtered["signal_name"]
+        + " ["
+        + filtered["signal_state"].str.upper()
+        + "] -> "
+        + filtered["target_class"].astype(str)
+    )
+    filtered = filtered.iloc[::-1].reset_index(drop=True)
 
-def _write_signal_correlation_heatmap(
-    path: Path, df: pd.DataFrame, imp_df: pd.DataFrame
-) -> Path | None:
-    top_signals = imp_df.head(15)["signal_name"].tolist() if not imp_df.empty else []
-    if len(top_signals) < 2:
-        return None
-    x = df[top_signals].apply(_numeric_series).fillna(0)
-    corr = x.corr()
+    fig, ax = plt.subplots(figsize=(10, 7))
+    y_pos = np.arange(len(filtered))
 
-    fig, ax = plt.subplots(figsize=(8, 7))
-    cax = ax.matshow(corr, cmap="coolwarm", vmin=-1, vmax=1)
-    fig.colorbar(cax)
-    ax.set_xticks(np.arange(len(top_signals)))
-    ax.set_yticks(np.arange(len(top_signals)))
-    ax.set_xticklabels(top_signals, rotation=90, ha="left", fontsize=8)
-    ax.set_yticklabels(top_signals, fontsize=8)
-    ax.set_title("Correlation Heatmap: Top 15 Signals", pad=30)
+    probs = filtered["conditional_prob"]
+    xerr_lower = np.maximum(0, probs - filtered["ci_lower_95"])
+    xerr_upper = np.maximum(0, filtered["ci_upper_95"] - probs)
+
+    ax.barh(
+        y_pos,
+        probs * 100,
+        xerr=[xerr_lower * 100, xerr_upper * 100],
+        color="#3498db",
+        capsize=4,
+        alpha=0.85,
+    )
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(filtered["label"], fontsize=9)
+    ax.set_xlabel("Conditional Probability (%) with 95% Bayesian Credible Interval")
+    ax.set_title("Top 15 Directional Signals: Conditional Probability & 95% CI", fontsize=12, pad=15)
+
+    for i, row in filtered.iterrows():
+        lift_str = f"Lift: {row['lift']:.2f}x (N={row['count']})"
+        ax.text(row["conditional_prob"] * 100 + 2, i, lift_str, va="center", fontsize=8, color="#1a365d")
+
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -400,38 +487,47 @@ def _write_signal_correlation_heatmap(
 
 
 def _generate_signal_insights(
-    single_df: pd.DataFrame,
-    combined_res: dict[str, object],
-    imp_df: pd.DataFrame,
-    redundancy_df: pd.DataFrame,
+    prob_df: pd.DataFrame, trap_df: pd.DataFrame, top_clean_df: pd.DataFrame
 ) -> list[str]:
     insights: list[str] = []
-    if not single_df.empty:
-        top_single = single_df.iloc[0]
+
+    if not top_clean_df.empty:
+        best_clean = top_clean_df.iloc[0]
         insights.append(
-            f"⭐ **Best Single Signal**: `{top_single['signal_name']}` achieved Max Precision = **{top_single['max_precision']}** (Buy Precision: {top_single['buy_precision']}, Sell Precision: {top_single['sell_precision']}, Active: {top_single['active_pct']}%)."
+            f"⭐ **Best Clean Alpha Signal**: `{best_clean['signal_name']}` ({best_clean['signal_state'].upper()}) achieved Clean Edge = **+{best_clean['clean_edge']:.2f}%** (True Alpha: {best_clean['true_alpha_pct']}%, Reversal Trap: {best_clean['reversal_trap_pct']}%, Active Triggers: {best_clean['trigger_count']})."
         )
 
-    if combined_res:
-        insights.append(
-            f"📊 **Combined Signal Model (`allow_entry`)**: Balanced Accuracy = **{combined_res.get('balanced_accuracy')}** (Train Score: {combined_res.get('score_train')}, Overfit Gap: {combined_res.get('overfit_gap')})."
+    if not prob_df.empty:
+        top_lift = (
+            prob_df[prob_df["count"] >= 30].sort_values("lift", ascending=False).head(1)
         )
-
-    if not imp_df.empty:
-        top_3_imp = ", ".join(
-            [
-                f"`{row['signal_name']}` ({row['importance']:.4f})"
-                for _, row in imp_df.head(3).iterrows()
-            ]
-        )
-        insights.append(f"🔥 **Top 3 Combined Signals**: {top_3_imp}.")
-
-    if not redundancy_df.empty:
-        high_corr_count = len(redundancy_df[redundancy_df["correlation"] >= 0.85])
-        if high_corr_count > 0:
-            top_pair = redundancy_df.iloc[0]
+        if not top_lift.empty:
+            best_lift = top_lift.iloc[0]
             insights.append(
-                f"⚠️ **Signal Redundancy**: Found {high_corr_count} highly correlated signal pairs (correlation >= 0.85). Highest redundancy: `{top_pair['signal_1']}` & `{top_pair['signal_2']}` (corr = {top_pair['correlation']})."
+                f"🚀 **Highest Probability Lift**: `{best_lift['signal_name']}` [{best_lift['signal_state']}] drives `{best_lift['target_class']}` probability to **{best_lift['conditional_prob']*100:.2f}%** (Lift = **{best_lift['lift']:.2f}x**, 95% CI: [{best_lift['ci_lower_95']*100:.1f}%, {best_lift['ci_upper_95']*100:.1f}%])."
+            )
+
+    if not trap_df.empty:
+        toxic_reversal = (
+            trap_df[trap_df["trigger_count"] >= 30]
+            .sort_values("adverse_risk_ratio", ascending=False)
+            .head(1)
+        )
+        if not toxic_reversal.empty:
+            worst_rev = toxic_reversal.iloc[0]
+            insights.append(
+                f"⚠️ **High Reversal Trap Warning**: `{worst_rev['signal_name']}` ({worst_rev['signal_state'].upper()}) has an Adverse Risk Ratio of **{worst_rev['adverse_risk_ratio']:.2f}x** (Reversal Trap: {worst_rev['reversal_trap_pct']}% vs True Alpha: {worst_rev['true_alpha_pct']}%). Buying or selling on this signal frequently triggers opposite counter-trend moves."
+            )
+
+        worst_whipsaw = (
+            trap_df[trap_df["trigger_count"] >= 30]
+            .sort_values("sideway_trap_pct", ascending=False)
+            .head(1)
+        )
+        if not worst_whipsaw.empty:
+            worst_whip = worst_whipsaw.iloc[0]
+            insights.append(
+                f"🌪️ **Most Sideway-Prone Signal**: `{worst_whip['signal_name']}` ({worst_whip['signal_state'].upper()}) gets caught in Sideway Whipsaw **{worst_whip['sideway_trap_pct']:.2f}%** of the time. Requires an ADX or Choppiness trend filter before execution."
             )
 
     return insights
@@ -440,10 +536,9 @@ def _generate_signal_insights(
 def _render_markdown(
     metadata: SignalRunMetadata,
     insights: list[str],
-    single_df: pd.DataFrame,
-    combined_res: dict[str, object],
-    imp_df: pd.DataFrame,
-    redundancy_df: pd.DataFrame,
+    top_clean_df: pd.DataFrame,
+    trap_df: pd.DataFrame,
+    prob_df: pd.DataFrame,
     chart_artifacts: list[Path],
 ) -> str:
     insights_text = (
@@ -451,20 +546,31 @@ def _render_markdown(
         if insights
         else "- No specific warnings."
     )
-    single_table = (
-        _markdown_table(single_df.head(20))
-        if not single_df.empty
-        else "No single signals evaluated."
+
+    clean_table = (
+        _markdown_table(top_clean_df.head(20))
+        if not top_clean_df.empty
+        else "No clean alpha signals found."
     )
-    imp_table = (
-        _markdown_table(imp_df.head(20))
-        if not imp_df.empty
-        else "No combined importances available."
+
+    reversal_table = (
+        _markdown_table(
+            trap_df[trap_df["trigger_count"] >= 30]
+            .sort_values("adverse_risk_ratio", ascending=False)
+            .head(10)
+        )
+        if not trap_df.empty
+        else "No reversal trap data available."
     )
-    redundancy_table = (
-        _markdown_table(redundancy_df.head(15))
-        if not redundancy_df.empty
-        else "No highly correlated signal pairs found."
+
+    prob_table = (
+        _markdown_table(
+            prob_df[prob_df["count"] >= 30]
+            .sort_values(["lift", "conditional_prob"], ascending=[False, False])
+            .head(20)
+        )
+        if not prob_df.empty
+        else "No probability matrix data available."
     )
 
     images_text = ""
@@ -472,21 +578,7 @@ def _render_markdown(
         images_list = [f"![{path.stem}]({path.name})" for path in chart_artifacts]
         images_text = "\n\n## Visual Charts\n\n" + "\n\n".join(images_list)
 
-    combined_summary = (
-        (
-            f"- Target: `{combined_res.get('target')}`\n"
-            f"- Model: `{combined_res.get('model')}`\n"
-            f"- Test Balanced Accuracy: **{combined_res.get('balanced_accuracy')}**\n"
-            f"- Test Accuracy: **{combined_res.get('accuracy')}**\n"
-            f"- F1 Weighted: **{combined_res.get('f1_weighted')}**\n"
-            f"- Train Score: {combined_res.get('score_train')}\n"
-            f"- Overfit Gap: {combined_res.get('overfit_gap')}"
-        )
-        if combined_res
-        else "Combined model unavailable."
-    )
-
-    return f"""# Signal Feature Analysis Report (`allow_entry`)
+    return f"""# Discrete Signal Probability & Trap Diagnosis Report (`{metadata.target_label}`)
 
 ## Executive Summary & Insights
 
@@ -504,63 +596,69 @@ def _render_markdown(
 - Target label: `{metadata.target_label}`
 - Model rows sampled: {metadata.model_rows}
 
-## 1. Single Signal Performance Ranking (`allow_entry`)
+## 1. Top Clean Alpha Signals (Ranked by Clean Directional Edge)
 
-{single_table}
+Clean Edge = `True Alpha %` - `Reversal Trap %`. A positive clean edge indicates that the signal's directional wins reliably outpace disastrous counter-trend reversals.
 
-## 2. Combined Signals Machine Learning Model
+{clean_table}
 
-{combined_summary}
+## 2. High-Risk Reversal Trap Diagnosis (Toxic Signals to Avoid)
 
-### Top Combined Signal Importances
+Adverse Risk Ratio = `Reversal Trap %` / `True Alpha %`. A ratio > 1.0 indicates that when this signal triggers, it is more likely to cause a counter-trend liquidation than a profitable trade.
 
-{imp_table}
+{reversal_table}
 
-## 3. Signal Redundancy & Correlation Analysis
+## 3. Discrete Conditional Probability & Bayesian Lift Highlights
 
-{redundancy_table}
+Full discrete conditional distribution $P(\\text{{Target}} = \\text{{Class}} \\mid \\text{{Signal}} = \\text{{State}})$ with 95% Bayesian Credible Intervals (Beta-Binomial Jeffreys Prior).
+
+{prob_table}
 {images_text}
 
 ## Artifacts
 
 - `summary.json`
-- `single_signal_scores.csv`
-- `combined_signal_importance.csv`
-- `signal_redundancy.csv`
+- `signal_probability_matrix.csv`
+- `signal_trap_diagnosis.csv`
+- `top_clean_signals.csv`
 """
 
 
 def _render_html(
     markdown: str,
-    single_df: pd.DataFrame,
-    combined_res: dict[str, object],
-    imp_df: pd.DataFrame,
+    top_clean_df: pd.DataFrame,
+    prob_df: pd.DataFrame,
 ) -> str:
-    single_html = (
-        single_df.head(20).to_html(index=False, classes="data-table") if not single_df.empty else ""
+    clean_html = (
+        top_clean_df.head(20).to_html(index=False, classes="data-table")
+        if not top_clean_df.empty
+        else ""
     )
-    imp_html = (
-        imp_df.head(20).to_html(index=False, classes="data-table") if not imp_df.empty else ""
+    prob_html = (
+        prob_df.head(25).to_html(index=False, classes="data-table")
+        if not prob_df.empty
+        else ""
     )
     return f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8"/>
-    <title>Signal Feature Analysis Report</title>
+    <title>Discrete Signal Probability & Trap Diagnosis Report</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; margin: 2rem; color: #2d3748; }}
         h1, h2, h3 {{ color: #1a202c; }}
         table.data-table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; }}
         table.data-table th, table.data-table td {{ border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }}
-        table.data-table th {{ background-color: #f7fafc; }}
+        table.data-table th {{ background-color: #f7fafc; font-weight: 600; }}
+        tr:nth-child(even) {{ background-color: #f8fafc; }}
     </style>
 </head>
 <body>
-    <h1>Signal Feature Analysis Report (allow_entry)</h1>
-    <h2>Top Single Signals</h2>
-    {single_html}
-    <h2>Top Combined Signal Importances</h2>
-    {imp_html}
+    <h1>Discrete Signal Probability & Trap Diagnosis Report</h1>
+    <h2>Top Clean Alpha Signals (True Alpha vs Reversal Edge)</h2>
+    {clean_html}
+    <h2>Discrete Conditional Probability & Bayesian Lift</h2>
+    {prob_html}
 </body>
 </html>
 """

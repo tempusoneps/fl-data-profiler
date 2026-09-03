@@ -11,7 +11,7 @@ resolution-markers = [
 [[package]]
 name = "autofcholv"
 version = "0.3.0"
-source = { git = "https://github.com/tempusoneps/autofcholv.git?branch=develop#33c9941ca8470ed5de5c25a2d3e3ba41494ae52e" }
+source = { git = "https://github.com/tempusoneps/autofcholv.git?branch=develop#e971da1647e6f5dbb1fead1f2099e10cb7d274b3" }
 dependencies = [
     { name = "pandas" },
     { name = "pandas-ta" },
@@ -147,6 +147,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "shap" },
+    { name = "signalx" },
     { name = "statsmodels" },
     { name = "tqdm" },
     { name = "xgboost" },
@@ -171,6 +172,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "scipy", specifier = ">=1.16.0" },
     { name = "shap", specifier = ">=0.48.0" },
+    { name = "signalx", git = "https://github.com/tempusoneps/signalx.git?branch=develop" },
     { name = "statsmodels", specifier = ">=0.14.6" },
     { name = "tqdm", specifier = ">=4.67.0" },
     { name = "xgboost", specifier = ">=3.0.0" },
@@ -783,6 +785,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/8e/78/f8f86c768a2fae213d99721666eb01653347b1398cf6e24afd84743899a8/shap-0.52.0-cp312-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6b843d61e18ad4659584e004a4e681fff0648d4cf371830e3019709722190467", size = 1570560, upload-time = "2026-05-28T14:17:39.058Z" },
     { url = "https://files.pythonhosted.org/packages/5d/20/f5824640d8e7bf6bffb2ed8f6221c8c6fb2d39b638ba72f01b60e934e40f/shap-0.52.0-cp312-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:2828d18366db812599a5d8340ce93fed9c95d97337d90568597b2e96d01ce516", size = 1627401, upload-time = "2026-05-28T14:17:40.435Z" },
     { url = "https://files.pythonhosted.org/packages/58/bf/6be16d28ef1b6ff69078a1d7ea58892e9d40a4680c1077563f74ebd31c9e/shap-0.52.0-cp312-abi3-win_amd64.whl", hash = "sha256:07d44ace491ca6204dac6ce4fda128bcaeff27553a279bca67c55a14987cc957", size = 499853, upload-time = "2026-05-28T14:17:41.786Z" },
+]
+
+[[package]]
+name = "signalx"
+version = "0.1.0"
+source = { git = "https://github.com/tempusoneps/signalx.git?branch=develop#007da35368b0d187e362e209b4f65d9523e5b434" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pandas-ta" },
+    { name = "pyarrow" },
+    { name = "scipy" },
+    { name = "statsmodels" },
+    { name = "ta" },
+    { name = "tqdm" },
 ]
 
 [[package]]
