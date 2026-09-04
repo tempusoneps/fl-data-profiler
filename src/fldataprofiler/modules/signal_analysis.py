@@ -137,7 +137,7 @@ class SignalAnalysisModule:
         run_dir = output_dir / self.name
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        with ModuleProgress(self.name, total=2, enabled=self.progress) as progress_bar:
+        with ModuleProgress(self.name, total=3, enabled=self.progress) as progress_bar:
             # 1. Discrete Conditional Probability & Bayesian Lift Matrix
             prob_matrix_df = _compute_discrete_probability_matrix(
                 model_frame, signal_columns, target_col
@@ -150,6 +150,31 @@ class SignalAnalysisModule:
             )
             progress_bar.step("trap_diagnosis")
 
+            # 3. Multi-Year Stability & Consistency Analysis
+            yearly_df, ranking_df = _compute_yearly_stability(
+                model_frame, signal_columns, target_col, trap_df, min_triggers=20
+            )
+            progress_bar.step("yearly_stability")
+
+        # Enrich top_clean_df with consistency_pct and worst_year_edge from ranking_df
+        if not top_clean_df.empty and not ranking_df.empty:
+            merge_cols = [
+                c
+                for c in ["signal_name", "signal_state", "consistency_pct", "worst_year_edge"]
+                if c in ranking_df.columns
+            ]
+            if len(merge_cols) >= 3:
+                top_clean_df = top_clean_df.merge(
+                    ranking_df[merge_cols],
+                    on=["signal_name", "signal_state"],
+                    how="left",
+                )
+        if not top_clean_df.empty:
+            if "consistency_pct" not in top_clean_df.columns:
+                top_clean_df["consistency_pct"] = None
+            if "worst_year_edge" not in top_clean_df.columns:
+                top_clean_df["worst_year_edge"] = None
+
         # Generate Visual Charts
         chart_artifacts: list[Path] = []
         trap_chart_path = run_dir / "signal_trap_distribution.png"
@@ -159,6 +184,10 @@ class SignalAnalysisModule:
         prob_chart_path = run_dir / "top_signal_probabilities.png"
         if _write_top_probabilities_chart(prob_chart_path, prob_matrix_df):
             chart_artifacts.append(prob_chart_path)
+
+        yearly_chart_path = run_dir / "signal_yearly_stability.png"
+        if _write_yearly_stability_heatmap(yearly_chart_path, yearly_df, top_clean_df):
+            chart_artifacts.append(yearly_chart_path)
 
         metadata = SignalRunMetadata(
             module=self.name,
@@ -175,7 +204,9 @@ class SignalAnalysisModule:
             target_label=target_col,
         )
 
-        insights = _generate_signal_insights(prob_matrix_df, trap_df, top_clean_df)
+        insights = _generate_signal_insights(
+            prob_matrix_df, trap_df, top_clean_df, ranking_df
+        )
         markdown = _render_markdown(
             metadata,
             insights,
@@ -183,6 +214,7 @@ class SignalAnalysisModule:
             trap_df,
             prob_matrix_df,
             chart_artifacts,
+            ranking_df,
         )
 
         report_md_path = run_dir / "report.md"
@@ -190,8 +222,27 @@ class SignalAnalysisModule:
 
         html_path = run_dir / "report.html"
         html_path.write_text(
-            _render_html(markdown, top_clean_df, prob_matrix_df),
+            _render_html(markdown, top_clean_df, prob_matrix_df, ranking_df),
             encoding="utf-8",
+        )
+
+        years_analyzed = (
+            sorted(
+                [int(y) if str(y).isdigit() else str(y) for y in yearly_df["year"].unique()],
+                key=lambda y: (0, int(y)) if isinstance(y, int) or str(y).isdigit() else (1, str(y)),
+            )
+            if not yearly_df.empty and "year" in yearly_df.columns
+            else []
+        )
+        top_stable_signals = (
+            ranking_df.head(20).where(pd.notna(ranking_df.head(20)), None).to_dict(orient="records")
+            if not ranking_df.empty
+            else []
+        )
+        yearly_stability_records = (
+            yearly_df.where(pd.notna(yearly_df), None).to_dict(orient="records")
+            if not yearly_df.empty
+            else []
         )
 
         artifacts = [
@@ -208,11 +259,16 @@ class SignalAnalysisModule:
                     .head(20)
                     .to_dict(orient="records"),
                     "top_probabilities": prob_matrix_df.head(30).to_dict(orient="records"),
+                    "years_analyzed": years_analyzed,
+                    "top_stable_signals": top_stable_signals,
+                    "yearly_stability": yearly_stability_records,
                 },
             ),
             _write_csv(run_dir / "signal_probability_matrix.csv", prob_matrix_df),
             _write_csv(run_dir / "signal_trap_diagnosis.csv", trap_df),
             _write_csv(run_dir / "top_clean_signals.csv", top_clean_df),
+            _write_csv(run_dir / "signal_yearly_stability.csv", yearly_df),
+            _write_csv(run_dir / "signal_stability_ranking.csv", ranking_df),
             report_md_path,
             html_path,
             *chart_artifacts,
@@ -373,6 +429,275 @@ def _compute_trap_diagnosis(
     return trap_df, top_clean_df
 
 
+YEARLY_STABILITY_COLUMNS = [
+    "signal_name",
+    "signal_state",
+    "year",
+    "trigger_count",
+    "true_alpha_pct",
+    "sideway_trap_pct",
+    "reversal_trap_pct",
+    "vol_trap_pct",
+    "clean_edge",
+    "adverse_risk_ratio",
+    "status",
+]
+
+STABILITY_RANKING_COLUMNS = [
+    "signal_name",
+    "signal_state",
+    "overall_clean_edge",
+    "years_evaluated",
+    "positive_years",
+    "consistency_pct",
+    "mean_clean_edge",
+    "worst_year_edge",
+    "best_year_edge",
+    "edge_volatility",
+    "stability_grade",
+]
+
+
+def _extract_years(df: pd.DataFrame) -> pd.Series | None:
+    """Extract chronological year Series from DataFrame index or date columns."""
+    if isinstance(df.index, pd.DatetimeIndex):
+        return pd.Series(df.index.year, index=df.index)
+
+    if not (df.index.dtype.kind in "iuf"):
+        try:
+            converted = pd.to_datetime(df.index, errors="coerce")
+            if converted.notna().sum() >= max(1, int(len(df) * 0.5)):
+                return pd.Series(converted.year, index=df.index)
+        except Exception:
+            pass
+
+    for col in ["date", "Date", "DATE", "timestamp", "Timestamp"]:
+        if col in df.columns:
+            try:
+                dt_col = pd.to_datetime(df[col], errors="coerce")
+                if dt_col.notna().sum() >= max(1, int(len(df) * 0.5)):
+                    return pd.Series(dt_col.dt.year.values, index=df.index)
+            except Exception:
+                pass
+
+    return None
+
+
+def _compute_yearly_stability(
+    df: pd.DataFrame,
+    signal_columns: list[str],
+    target_col: str,
+    trap_df: pd.DataFrame,
+    min_triggers: int = 20,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compute multi-year stability and consistency ranking for signals."""
+    if target_col not in df.columns:
+        return (
+            pd.DataFrame(columns=YEARLY_STABILITY_COLUMNS),
+            pd.DataFrame(columns=STABILITY_RANKING_COLUMNS),
+        )
+
+    valid_df = df.dropna(subset=[target_col]).copy()
+    if valid_df.empty:
+        return (
+            pd.DataFrame(columns=YEARLY_STABILITY_COLUMNS),
+            pd.DataFrame(columns=STABILITY_RANKING_COLUMNS),
+        )
+
+    year_series = _extract_years(valid_df)
+    if year_series is not None:
+        valid_mask = year_series.notna()
+        valid_df = valid_df.loc[valid_mask].copy()
+        year_series = year_series.loc[valid_mask]
+        valid_years = sorted([int(y) for y in year_series.unique()])
+        years: list[int | str] = valid_years if valid_years else ["All"]
+        if not valid_years:
+            year_series = None
+    else:
+        years = ["All"]
+
+    unique_classes = [str(c) for c in valid_df[target_col].unique()]
+    buy_map = {cls: _classify_outcome("buy", cls) for cls in unique_classes}
+    sell_map = {cls: _classify_outcome("sell", cls) for cls in unique_classes}
+
+    trap_lookup: dict[tuple[str, str], float | None] = {}
+    candidate_pairs: list[tuple[str, str]] = []
+
+    if (
+        trap_df is not None
+        and not trap_df.empty
+        and "signal_name" in trap_df.columns
+        and "signal_state" in trap_df.columns
+    ):
+        filtered = trap_df[trap_df["signal_name"].isin(signal_columns)]
+        if not filtered.empty:
+            candidate_pairs = list(
+                filtered[["signal_name", "signal_state"]].drop_duplicates().itertuples(index=False, name=None)
+            )
+            if "clean_edge" in filtered.columns:
+                for _, r in filtered.iterrows():
+                    trap_lookup[(str(r["signal_name"]), str(r["signal_state"]))] = (
+                        float(r["clean_edge"]) if pd.notna(r["clean_edge"]) else None
+                    )
+
+    if not candidate_pairs:
+        for col in signal_columns:
+            if col not in valid_df.columns:
+                continue
+            norm_series = valid_df[col].apply(_normalize_signal_state)
+            for state in ["buy", "sell"]:
+                if (norm_series == state).sum() >= 5:
+                    candidate_pairs.append((col, state))
+
+    if not candidate_pairs:
+        for col in signal_columns:
+            if col not in valid_df.columns:
+                continue
+            norm_series = valid_df[col].apply(_normalize_signal_state)
+            for state in ["buy", "sell"]:
+                if (norm_series == state).sum() > 0:
+                    candidate_pairs.append((col, state))
+
+    yearly_rows: list[dict[str, object]] = []
+    ranking_rows: list[dict[str, object]] = []
+
+    for col, state in candidate_pairs:
+        if col not in valid_df.columns:
+            continue
+
+        norm_series = valid_df[col].apply(_normalize_signal_state)
+        state_mask = norm_series == state
+        outcome_map = buy_map if state == "buy" else sell_map
+
+        sig_year_rows: list[dict[str, object]] = []
+
+        for y in years:
+            if year_series is not None:
+                year_mask = year_series == y
+                combined_mask = state_mask & year_mask
+            else:
+                combined_mask = state_mask
+
+            count = int(combined_mask.sum())
+            if count > 0:
+                target_slice = valid_df.loc[combined_mask, target_col].astype(str)
+                val_counts = target_slice.value_counts().to_dict()
+
+                alpha_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) == "true_alpha")
+                sideway_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) == "sideway_trap")
+                reversal_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) == "reversal_trap")
+                vol_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) in ["vol_trap", "other_trap"])
+
+                alpha_pct = (alpha_cnt / count) * 100
+                sideway_pct = (sideway_cnt / count) * 100
+                reversal_pct = (reversal_cnt / count) * 100
+                vol_pct = (vol_cnt / count) * 100
+
+                clean_edge = alpha_pct - reversal_pct
+                adverse_risk = reversal_pct / (alpha_pct + 1e-6)
+            else:
+                alpha_pct = 0.0
+                sideway_pct = 0.0
+                reversal_pct = 0.0
+                vol_pct = 0.0
+                clean_edge = None
+                adverse_risk = None
+
+            if count >= min_triggers:
+                status = "valid"
+                edge_val = _round(clean_edge) if clean_edge is not None else None
+                risk_val = _round(adverse_risk) if adverse_risk is not None else None
+            else:
+                status = "insufficient_data"
+                edge_val = None
+                risk_val = None
+
+            row: dict[str, object] = {
+                "signal_name": col,
+                "signal_state": state,
+                "year": y,
+                "trigger_count": count,
+                "true_alpha_pct": _round(alpha_pct),
+                "sideway_trap_pct": _round(sideway_pct),
+                "reversal_trap_pct": _round(reversal_pct),
+                "vol_trap_pct": _round(vol_pct),
+                "clean_edge": edge_val,
+                "adverse_risk_ratio": risk_val,
+                "status": status,
+            }
+
+            sig_year_rows.append(row)
+            yearly_rows.append(row)
+
+        valid_edges = [
+            float(r["clean_edge"])
+            for r in sig_year_rows
+            if r["status"] == "valid" and r["clean_edge"] is not None
+        ]
+        years_eval = len(valid_edges)
+
+        if years_eval > 0:
+            pos_years = sum(1 for e in valid_edges if e > 0)
+            consistency = _round((pos_years / years_eval) * 100.0)
+            mean_edge = _round(float(np.mean(valid_edges)))
+            worst_edge = _round(float(np.min(valid_edges)))
+            best_edge = _round(float(np.max(valid_edges)))
+            edge_vol = _round(float(np.std(valid_edges, ddof=1))) if years_eval > 1 else 0.0
+        else:
+            pos_years = 0
+            consistency = 0.0
+            mean_edge = 0.0
+            worst_edge = None
+            best_edge = None
+            edge_vol = 0.0
+
+        if years_eval > 0 and (consistency or 0.0) >= 75.0 and (mean_edge or 0.0) > 0:
+            stability_grade = "STABLE_ALPHA"
+        elif years_eval > 0 and (consistency or 0.0) >= 50.0 and (mean_edge or 0.0) > 0:
+            stability_grade = "MODERATE_STABLE"
+        else:
+            stability_grade = "ERRATIC / UNSTABLE"
+
+        overall_edge = trap_lookup.get((col, state))
+        if overall_edge is None:
+            all_count = int(state_mask.sum())
+            if all_count > 0:
+                target_slice = valid_df.loc[state_mask, target_col].astype(str)
+                val_counts = target_slice.value_counts().to_dict()
+                alpha_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) == "true_alpha")
+                reversal_cnt = sum(cnt for cls, cnt in val_counts.items() if outcome_map.get(cls) == "reversal_trap")
+                overall_edge = _round(((alpha_cnt - reversal_cnt) / all_count) * 100)
+            else:
+                overall_edge = 0.0
+
+        ranking_rows.append(
+            {
+                "signal_name": col,
+                "signal_state": state,
+                "overall_clean_edge": overall_edge,
+                "years_evaluated": years_eval,
+                "positive_years": pos_years,
+                "consistency_pct": consistency,
+                "mean_clean_edge": mean_edge,
+                "worst_year_edge": worst_edge,
+                "best_year_edge": best_edge,
+                "edge_volatility": edge_vol,
+                "stability_grade": stability_grade,
+            }
+        )
+
+    yearly_df = pd.DataFrame(yearly_rows, columns=YEARLY_STABILITY_COLUMNS)
+    ranking_df = pd.DataFrame(ranking_rows, columns=STABILITY_RANKING_COLUMNS)
+
+    if not ranking_df.empty:
+        ranking_df = ranking_df.sort_values(
+            ["consistency_pct", "mean_clean_edge", "overall_clean_edge"],
+            ascending=[False, False, False],
+        ).reset_index(drop=True)
+
+    return yearly_df, ranking_df
+
+
 def _write_trap_distribution_chart(path: Path, top_clean_df: pd.DataFrame) -> Path | None:
     if top_clean_df.empty:
         return None
@@ -459,14 +784,17 @@ def _write_top_probabilities_chart(path: Path, prob_df: pd.DataFrame) -> Path | 
     fig, ax = plt.subplots(figsize=(10, 7))
     y_pos = np.arange(len(filtered))
 
-    probs = filtered["conditional_prob"]
-    xerr_lower = np.maximum(0, probs - filtered["ci_lower_95"])
-    xerr_upper = np.maximum(0, filtered["ci_upper_95"] - probs)
+    probs = filtered["conditional_prob"].to_numpy(dtype=float)
+    ci_lower = filtered["ci_lower_95"].to_numpy(dtype=float)
+    ci_upper = filtered["ci_upper_95"].to_numpy(dtype=float)
+    xerr_lower = np.maximum(0.0, probs - ci_lower) * 100.0
+    xerr_upper = np.maximum(0.0, ci_upper - probs) * 100.0
+    xerr = [xerr_lower.tolist(), xerr_upper.tolist()]
 
     ax.barh(
         y_pos,
         probs * 100,
-        xerr=[xerr_lower * 100, xerr_upper * 100],
+        xerr=xerr,
         color="#3498db",
         capsize=4,
         alpha=0.85,
@@ -486,15 +814,165 @@ def _write_top_probabilities_chart(path: Path, prob_df: pd.DataFrame) -> Path | 
     return path
 
 
+def _write_yearly_stability_heatmap(
+    path: Path, yearly_df: pd.DataFrame, top_clean_df: pd.DataFrame
+) -> Path | None:
+    """Generate visual heatmap matrix of Clean Edge across evaluation years for top signals."""
+    if yearly_df is None or yearly_df.empty:
+        return None
+
+    required_cols = {"signal_name", "signal_state", "year"}
+    if not required_cols.issubset(yearly_df.columns):
+        return None
+
+    # Candidate signals: Top 15-20 from top_clean_df, or fallback to yearly_df
+    candidate_pairs: list[tuple[str, str]] = []
+    if top_clean_df is not None and not top_clean_df.empty:
+        if {"signal_name", "signal_state"}.issubset(top_clean_df.columns):
+            candidate_pairs = list(
+                top_clean_df[["signal_name", "signal_state"]]
+                .drop_duplicates()
+                .head(20)
+                .itertuples(index=False, name=None)
+            )
+
+    if not candidate_pairs:
+        candidate_pairs = list(
+            yearly_df[["signal_name", "signal_state"]]
+            .drop_duplicates()
+            .head(20)
+            .itertuples(index=False, name=None)
+        )
+
+    if not candidate_pairs:
+        return None
+
+    # Extract years chronologically
+    raw_years = yearly_df["year"].unique()
+    years = sorted(
+        raw_years,
+        key=lambda y: (0, int(y)) if str(y).isdigit() else (1, str(y)),
+    )
+
+    if not years:
+        return None
+
+    # Build lookup: (signal_name, signal_state, year) -> (clean_edge, status)
+    data_lookup: dict[tuple[str, str, object], tuple[float | None, str]] = {}
+    for _, row in yearly_df.iterrows():
+        sig = str(row["signal_name"])
+        state = str(row["signal_state"])
+        yr = row["year"]
+        c_edge = float(row["clean_edge"]) if pd.notna(row.get("clean_edge")) else None
+        st = str(row.get("status", "valid"))
+        data_lookup[(sig, state, yr)] = (c_edge, st)
+
+    n_signals = len(candidate_pairs)
+    n_years = len(years)
+
+    matrix_vals = np.full((n_signals, n_years), np.nan, dtype=float)
+    annot_texts: list[list[str]] = [["" for _ in range(n_years)] for _ in range(n_signals)]
+    is_na_matrix = np.full((n_signals, n_years), False, dtype=bool)
+
+    for i, (sig, state) in enumerate(candidate_pairs):
+        for j, yr in enumerate(years):
+            entry = data_lookup.get((str(sig), str(state), yr))
+            if entry is not None:
+                c_edge, st = entry
+                if st == "valid" and c_edge is not None:
+                    matrix_vals[i, j] = c_edge
+                    annot_texts[i][j] = f"{c_edge:+.1f}%" if c_edge != 0 else "0.0%"
+                else:
+                    matrix_vals[i, j] = np.nan
+                    annot_texts[i][j] = "N/A (<20)"
+                    is_na_matrix[i, j] = True
+            else:
+                matrix_vals[i, j] = np.nan
+                annot_texts[i][j] = "N/A (<20)"
+                is_na_matrix[i, j] = True
+
+    valid_vals = matrix_vals[~np.isnan(matrix_vals)]
+    if len(valid_vals) > 0:
+        max_abs = max(15.0, min(50.0, float(np.max(np.abs(valid_vals)))))
+    else:
+        max_abs = 25.0
+
+    from matplotlib.colors import TwoSlopeNorm
+
+    norm = TwoSlopeNorm(vmin=-max_abs, vcenter=0.0, vmax=max_abs)
+    cmap = plt.get_cmap("RdYlGn").copy()
+    if hasattr(cmap, "with_extremes"):
+        cmap = cmap.with_extremes(bad="#edf2f7")
+    else:
+        cmap.set_bad(color="#edf2f7")
+
+    width = max(6.0, min(14.0, 1.3 * n_years + 4.5))
+    height = max(4.0, min(16.0, 0.45 * n_signals + 2.0))
+    fig, ax = plt.subplots(figsize=(width, height))
+
+    im = ax.imshow(matrix_vals, cmap=cmap, norm=norm, aspect="auto")
+
+    labels = [f"{sig} ({str(state).upper()})" for sig, state in candidate_pairs]
+    ax.set_xticks(np.arange(n_years))
+    ax.set_xticklabels([str(y) for y in years], fontsize=10, fontweight="bold")
+    ax.set_yticks(np.arange(n_signals))
+    ax.set_yticklabels(labels, fontsize=9)
+
+    ax.set_xticks(np.arange(n_years + 1) - 0.5, minor=True)
+    ax.set_yticks(np.arange(n_signals + 1) - 0.5, minor=True)
+    ax.grid(which="minor", color="white", linestyle="-", linewidth=1.5)
+    ax.tick_params(which="minor", bottom=False, left=False)
+
+    ax.set_title(
+        "Signal Stability Across Years: Clean Directional Edge (%)",
+        fontsize=12,
+        pad=15,
+        fontweight="bold",
+    )
+    ax.set_xlabel("Evaluation Year", fontsize=10, labelpad=8)
+
+    for i in range(n_signals):
+        for j in range(n_years):
+            txt = annot_texts[i][j]
+            if is_na_matrix[i, j]:
+                ax.text(j, i, txt, ha="center", va="center", fontsize=8, color="#718096", style="italic")
+            else:
+                val = matrix_vals[i, j]
+                normed = norm(val)
+                text_color = "white" if (normed < 0.22 or normed > 0.78) else "#1a202c"
+                ax.text(
+                    j,
+                    i,
+                    txt,
+                    ha="center",
+                    va="center",
+                    fontsize=8.5,
+                    fontweight="bold",
+                    color=text_color,
+                )
+
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("Clean Edge % (True Alpha % - Reversal Trap %)", fontsize=9)
+
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return path
+
+
 def _generate_signal_insights(
-    prob_df: pd.DataFrame, trap_df: pd.DataFrame, top_clean_df: pd.DataFrame
+    prob_df: pd.DataFrame,
+    trap_df: pd.DataFrame,
+    top_clean_df: pd.DataFrame,
+    ranking_df: pd.DataFrame | None = None,
 ) -> list[str]:
     insights: list[str] = []
 
     if not top_clean_df.empty:
         best_clean = top_clean_df.iloc[0]
         insights.append(
-            f"⭐ **Best Clean Alpha Signal**: `{best_clean['signal_name']}` ({best_clean['signal_state'].upper()}) achieved Clean Edge = **+{best_clean['clean_edge']:.2f}%** (True Alpha: {best_clean['true_alpha_pct']}%, Reversal Trap: {best_clean['reversal_trap_pct']}%, Active Triggers: {best_clean['trigger_count']})."
+            f"⭐ **Best Clean Alpha Signal**: `{best_clean['signal_name']}` ({str(best_clean['signal_state']).upper()}) achieved Clean Edge = **+{best_clean['clean_edge']:.2f}%** (True Alpha: {best_clean['true_alpha_pct']}%, Reversal Trap: {best_clean['reversal_trap_pct']}%, Active Triggers: {best_clean['trigger_count']})."
         )
 
     if not prob_df.empty:
@@ -516,7 +994,7 @@ def _generate_signal_insights(
         if not toxic_reversal.empty:
             worst_rev = toxic_reversal.iloc[0]
             insights.append(
-                f"⚠️ **High Reversal Trap Warning**: `{worst_rev['signal_name']}` ({worst_rev['signal_state'].upper()}) has an Adverse Risk Ratio of **{worst_rev['adverse_risk_ratio']:.2f}x** (Reversal Trap: {worst_rev['reversal_trap_pct']}% vs True Alpha: {worst_rev['true_alpha_pct']}%). Buying or selling on this signal frequently triggers opposite counter-trend moves."
+                f"⚠️ **High Reversal Trap Warning**: `{worst_rev['signal_name']}` ({str(worst_rev['signal_state']).upper()}) has an Adverse Risk Ratio of **{worst_rev['adverse_risk_ratio']:.2f}x** (Reversal Trap: {worst_rev['reversal_trap_pct']}% vs True Alpha: {worst_rev['true_alpha_pct']}%). Buying or selling on this signal frequently triggers opposite counter-trend moves."
             )
 
         worst_whipsaw = (
@@ -527,8 +1005,22 @@ def _generate_signal_insights(
         if not worst_whipsaw.empty:
             worst_whip = worst_whipsaw.iloc[0]
             insights.append(
-                f"🌪️ **Most Sideway-Prone Signal**: `{worst_whip['signal_name']}` ({worst_whip['signal_state'].upper()}) gets caught in Sideway Whipsaw **{worst_whip['sideway_trap_pct']:.2f}%** of the time. Requires an ADX or Choppiness trend filter before execution."
+                f"🌪️ **Most Sideway-Prone Signal**: `{worst_whip['signal_name']}` ({str(worst_whip['signal_state']).upper()}) gets caught in Sideway Whipsaw **{worst_whip['sideway_trap_pct']:.2f}%** of the time. Requires an ADX or Choppiness trend filter before execution."
             )
+
+    if ranking_df is not None and not ranking_df.empty:
+        valid_ranking = ranking_df[ranking_df["years_evaluated"] > 0]
+        if not valid_ranking.empty:
+            most_consistent = valid_ranking.sort_values(
+                ["consistency_pct", "mean_clean_edge"], ascending=[False, False]
+            ).iloc[0]
+            consistency = most_consistent.get("consistency_pct")
+            if consistency is not None and pd.notna(consistency) and float(consistency) >= 50.0:
+                mean_edge_val = most_consistent.get("mean_clean_edge", 0.0) or 0.0
+                worst_edge_val = most_consistent.get("worst_year_edge", 0.0) or 0.0
+                insights.append(
+                    f"🛡️ **Most Consistent Multi-Year Signal**: `{most_consistent['signal_name']}` ({str(most_consistent['signal_state']).upper()}) demonstrated **{float(consistency):.1f}% Consistency** across {int(most_consistent['years_evaluated'])} evaluated year(s) with Mean Clean Edge = **{float(mean_edge_val):+.2f}%** (Worst Year: {float(worst_edge_val):+.2f}%, Grade: `{most_consistent['stability_grade']}`)."
+                )
 
     return insights
 
@@ -540,6 +1032,7 @@ def _render_markdown(
     trap_df: pd.DataFrame,
     prob_df: pd.DataFrame,
     chart_artifacts: list[Path],
+    ranking_df: pd.DataFrame | None = None,
 ) -> str:
     insights_text = (
         "\n".join([f"- {insight}" for insight in insights])
@@ -571,6 +1064,12 @@ def _render_markdown(
         )
         if not prob_df.empty
         else "No probability matrix data available."
+    )
+
+    stability_table = (
+        _markdown_table(ranking_df.head(20))
+        if ranking_df is not None and not ranking_df.empty
+        else "No multi-year stability ranking available (requires >= 20 triggers per year)."
     )
 
     images_text = ""
@@ -613,6 +1112,12 @@ Adverse Risk Ratio = `Reversal Trap %` / `True Alpha %`. A ratio > 1.0 indicates
 Full discrete conditional distribution $P(\\text{{Target}} = \\text{{Class}} \\mid \\text{{Signal}} = \\text{{State}})$ with 95% Bayesian Credible Intervals (Beta-Binomial Jeffreys Prior).
 
 {prob_table}
+
+## 4. Multi-Year Stability & Consistency Analysis
+
+Signals evaluated across calendar years (minimum 20 triggers per year). Consistency measures the percentage of calendar years in which the signal maintained a positive Clean Directional Edge.
+
+{stability_table}
 {images_text}
 
 ## Artifacts
@@ -621,6 +1126,8 @@ Full discrete conditional distribution $P(\\text{{Target}} = \\text{{Class}} \\m
 - `signal_probability_matrix.csv`
 - `signal_trap_diagnosis.csv`
 - `top_clean_signals.csv`
+- `signal_yearly_stability.csv`
+- `signal_stability_ranking.csv`
 """
 
 
@@ -628,6 +1135,7 @@ def _render_html(
     markdown: str,
     top_clean_df: pd.DataFrame,
     prob_df: pd.DataFrame,
+    ranking_df: pd.DataFrame | None = None,
 ) -> str:
     clean_html = (
         top_clean_df.head(20).to_html(index=False, classes="data-table")
@@ -638,6 +1146,12 @@ def _render_html(
         prob_df.head(25).to_html(index=False, classes="data-table")
         if not prob_df.empty
         else ""
+    )
+    stability_html = (
+        "<h2>Multi-Year Stability &amp; Consistency Ranking</h2>\n"
+        + ranking_df.head(20).to_html(index=False, classes="data-table")
+        if ranking_df is not None and not ranking_df.empty
+        else "<h2>Multi-Year Stability &amp; Consistency Ranking</h2>\n<p>No multi-year stability data available.</p>"
     )
     return f"""<!DOCTYPE html>
 <html>
@@ -659,6 +1173,7 @@ def _render_html(
     {clean_html}
     <h2>Discrete Conditional Probability & Bayesian Lift</h2>
     {prob_html}
+    {stability_html}
 </body>
 </html>
 """

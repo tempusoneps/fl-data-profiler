@@ -15,7 +15,7 @@
 - **`probability_markov`** (hoặc `markov`, `sequential_probability`, `transition_probability`): Sequential state-transition conditional probability ($P(Y_{t+1} \mid S_t \cap S_{t-1})$), Markov transition entropy, excess alpha momentum triggers ($\Delta P$), and 2D state transition heatmaps.
 - **`probability_scorecard`** (hoặc `scorecard`, `woe_scorecard`, `logodds`): Multivariate WoE additive scorecard model, log-odds point scaling (Base Score 600, PDO 20), Kolmogorov-Smirnov (KS) statistic separation, and decile probability calibration curves.
 - **`information_coefficient`**: Walk-forward time-series Pearson IC and Spearman Rank IC across rolling time folds.
-- **`signal_analysis`**: Single trading signal scoring (ROC-AUC, PR-AUC, F1), signal redundancy matrix, and combined XGBoost multi-signal model.
+- **`signal_analysis`**: Discrete conditional probability, market trap diagnosis (True Alpha vs Whipsaw/Reversal Trap), and multi-year stability & consistency analysis.
 - **`regime_scoring`**: Market regime-aware feature scoring across volatility/trend segments.
 
 ## 2. Exploratory Data Analysis & Statistics

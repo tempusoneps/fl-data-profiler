@@ -790,7 +790,7 @@ wheels = [
 [[package]]
 name = "signalx"
 version = "0.1.0"
-source = { git = "https://github.com/tempusoneps/signalx.git?branch=develop#007da35368b0d187e362e209b4f65d9523e5b434" }
+source = { git = "https://github.com/tempusoneps/signalx.git?branch=develop#ee09139940860c4a27903d74f5d90e4095c5c5ba" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },

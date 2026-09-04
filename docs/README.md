@@ -27,7 +27,7 @@ fl-data-profiling
 │   ├── probability_markov       : Ma trận xác suất chuyển dịch trạng thái theo chuỗi thời gian (Q_{t-1} -> Q_t)
 │   ├── probability_scorecard    : Bảng điểm tích lũy Multivariate WoE & Bayesian Log-Odds Scorecard
 │   ├── information_coefficient  : Walk-forward IC (Pearson & Spearman Rank IC) chuỗi thời gian
-│   ├── signal_analysis          : Đánh giá tín hiệu đơn lẻ, ma trận dư thừa & tín hiệu kết hợp
+│   ├── signal_analysis          : Xác suất rời rạc, chẩn đoán bẫy thị trường & độ ổn định nhiều năm
 │   └── regime_scoring           : Đánh giá sức mạnh đặc trưng theo từng chế độ thị trường
 │
 ├── 3. Phân cụm & Trực quan Vùng Quyết định (Clustering & Rules)
@@ -79,7 +79,7 @@ fl-data-profiling
 | `statsmodels` | [`statsmodels.md`](statsmodels.md) | Econometrics | Mô hình hồi quy OLS/Logit, t-stat, p-value, khoảng tin cậy 95%, AIC/BIC |
 | `kmean` (hoặc `kmeans_gpu`) | [`kmean.md`](kmean.md) | Clustering | Phân cụm cặp đặc trưng 2D và đo lường độ chính xác phân tách nhãn |
 | `visual_regions` | [`visual_regions.md`](visual_regions.md) | Rule Extraction | Trích xuất vùng quyết định 2D và sinh luật Bounding Box dạng if-then |
-| `signal_analysis` | [`signal_analysis.md`](signal_analysis.md) | Signal Evaluation | Đánh giá tín hiệu đơn lẻ, ma trận dư thừa (redundancy) và mô hình kết hợp |
+| `signal_analysis` | [`signal_analysis.md`](signal_analysis.md) | Signal Evaluation | Xác suất rời rạc, chẩn đoán bẫy thị trường (Whipsaw/Reversal) & độ ổn định nhiều năm |
 | `information_coefficient` | [`information_coefficient.md`](information_coefficient.md) | Time-Series IC | Tính toán Pearson & Spearman Rank IC qua các cửa sổ trượt Walk-Forward |
 | `mutual_information` | [`mutual_information.md`](mutual_information.md) | Information Theory | Đo lường mức độ phụ thuộc phi tuyến độc lập với mô hình |
 | `permutation_importance_ts` | [`permutation_importance_ts.md`](permutation_importance_ts.md) | Model Importance | Mức độ suy giảm hiệu năng khi xáo trộn feature trên out-of-fold samples |
